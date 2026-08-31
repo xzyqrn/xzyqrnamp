@@ -12,11 +12,17 @@ final class AudioRenderState: @unchecked Sendable {
     let beatPlayer: BeatPlayer
     let recorder: Recorder
     var engineSampleRate: Double = 48000
-    var inputChannel: Int = 0
+    private let inputChannelPtr: UnsafeMutablePointer<Int32>
+    private let sharedClock: Bool
+    private var persistentQueueError = 0
     private let preRollFrames: Int
     private var isPrimed = false
     private var fadeInFrames = 0
     private var lastInputSample: Float = 0
+    private var consecutiveStarves = 0
+    private var autoEnv0: Float = 0
+    private var autoEnv1: Float = 0
+    private var autoUseRight = false
 
     init(
         processor: UnsafeMutableRawPointer,
@@ -25,15 +31,18 @@ final class AudioRenderState: @unchecked Sendable {
         capacity: Int = 32_768,
         preRollFrames: Int = 256,
         engineSampleRate: Double = 48000,
-        inputChannel: Int = 0
+        inputChannel: Int = 0,
+        sharedClock: Bool = false
     ) {
         self.processor = processor
         self.beatPlayer = beatPlayer
         self.recorder = recorder
         self.capacity = capacity
         self.engineSampleRate = engineSampleRate
-        self.inputChannel = inputChannel
+        self.sharedClock = sharedClock
         self.preRollFrames = max(128, min(preRollFrames, capacity / 4))
+        inputChannelPtr = .allocate(capacity: 1)
+        inputChannelPtr.initialize(to: Int32(inputChannel))
         capture = .allocate(capacity: capacity)
         work = .allocate(capacity: capacity)
         fifo = AmpAudioFIFOCreate(Int32(capacity))!
@@ -46,7 +55,22 @@ final class AudioRenderState: @unchecked Sendable {
         work.deinitialize(count: capacity)
         capture.deallocate()
         work.deallocate()
+        inputChannelPtr.deinitialize(count: 1)
+        inputChannelPtr.deallocate()
         AmpAudioFIFODestroy(fifo)
+    }
+
+    var inputChannel: Int {
+        get { Int(OSAtomicAdd32Barrier(0, inputChannelPtr)) }
+        set {
+            let value = Int32(newValue)
+            while true {
+                let current = inputChannelPtr.pointee
+                if OSAtomicCompareAndSwap32Barrier(current, value, inputChannelPtr) {
+                    return
+                }
+            }
+        }
     }
 
     func mixdown(_ list: UnsafePointer<AudioBufferList>, frames: Int) {
@@ -56,16 +80,15 @@ final class AudioRenderState: @unchecked Sendable {
 
         let bufCount = abl.count
         if bufCount > 1 {
-            // Non-interleaved multichannel
             let ch0 = abl[0].mData?.assumingMemoryBound(to: Float.self)
             let ch1 = abl.count > 1 ? abl[1].mData?.assumingMemoryBound(to: Float.self) : nil
 
             switch inputChannel {
-            case 1: // Channel 2 (Inst 2 / Right)
+            case 1:
                 if let src = ch1 ?? ch0 {
                     memcpy(capture, src, frames * MemoryLayout<Float>.size)
                 }
-            case 2: // Sum 1+2
+            case 2:
                 if let s0 = ch0, let s1 = ch1 {
                     for i in 0..<frames {
                         capture[i] = (s0[i] + s1[i]) * 0.5
@@ -73,7 +96,13 @@ final class AudioRenderState: @unchecked Sendable {
                 } else if let s0 = ch0 {
                     memcpy(capture, s0, frames * MemoryLayout<Float>.size)
                 }
-            default: // Channel 1 (Default / Left)
+            case 3:
+                if let s0 = ch0, let s1 = ch1 {
+                    copyAutoChannel(left: s0, right: s1, frames: frames)
+                } else if let s0 = ch0 {
+                    memcpy(capture, s0, frames * MemoryLayout<Float>.size)
+                }
+            default:
                 if let src = ch0 {
                     memcpy(capture, src, frames * MemoryLayout<Float>.size)
                 }
@@ -84,12 +113,12 @@ final class AudioRenderState: @unchecked Sendable {
                 memcpy(capture, data, frames * MemoryLayout<Float>.size)
             } else {
                 switch inputChannel {
-                case 1: // Channel 2 (Inst 2 / Right)
+                case 1:
                     let offset = channels > 1 ? 1 : 0
                     for frame in 0..<frames {
                         capture[frame] = data[frame * channels + offset]
                     }
-                case 2: // Sum 1+2
+                case 2:
                     if channels > 1 {
                         for frame in 0..<frames {
                             capture[frame] = (data[frame * channels] + data[frame * channels + 1]) * 0.5
@@ -97,7 +126,13 @@ final class AudioRenderState: @unchecked Sendable {
                     } else {
                         memcpy(capture, data, frames * MemoryLayout<Float>.size)
                     }
-                default: // Channel 1 (Default / Left)
+                case 3:
+                    if channels > 1 {
+                        copyAutoInterleaved(data, channels: channels, frames: frames)
+                    } else {
+                        memcpy(capture, data, frames * MemoryLayout<Float>.size)
+                    }
+                default:
                     for frame in 0..<frames {
                         capture[frame] = data[frame * channels]
                     }
@@ -106,8 +141,6 @@ final class AudioRenderState: @unchecked Sendable {
         }
         _ = AmpAudioFIFOWrite(fifo, capture, Int32(frames))
     }
-
-    private var consecutiveStarves = 0
 
     func render(_ list: UnsafeMutablePointer<AudioBufferList>, frames: Int) {
         let abl = UnsafeMutableAudioBufferListPointer(list)
@@ -119,7 +152,6 @@ final class AudioRenderState: @unchecked Sendable {
             return
         }
 
-        // Initial prime: wait until FIFO has a small cushion
         if !isPrimed {
             let required = min(capacity / 4, max(preRollFrames, frames * 2))
             guard Int(AmpAudioFIFOAvailable(fifo)) >= required else {
@@ -133,20 +165,22 @@ final class AudioRenderState: @unchecked Sendable {
             consecutiveStarves = 0
         }
 
-        // Keep independent input/output clocks centered without throwing away
-        // a chunk of waveform. Consume at most a few extra (or one fewer)
-        // samples and interpolate them across this block. The old bulk drain
-        // made an arbitrary phase jump that was audible as a click.
         let available = Int(AmpAudioFIFOAvailable(fifo))
         let target = max(preRollFrames, frames * 2)
-        let queueError = available - target
-        var requestedFrames = frames
-        if queueError > frames {
-            requestedFrames += min(4, max(1, queueError / max(frames, 1)))
-        } else if queueError < -(frames / 2), available >= frames {
-            requestedFrames = max(2, frames - 1)
+        var requestedFrames = Int(AmpAudioFIFORequestFrames(Int32(available), Int32(frames), Int32(target), sharedClock))
+        if !sharedClock {
+            let error = available - target
+            let deadzone = max(32, frames / 4)
+            if abs(error) > deadzone {
+                persistentQueueError += 1
+            } else {
+                persistentQueueError = 0
+            }
+            if persistentQueueError < 48 {
+                requestedFrames = frames
+            }
         }
-        requestedFrames = min(requestedFrames, capacity)
+        requestedFrames = min(max(requestedFrames, 1), capacity)
 
         let received = Int(AmpAudioFIFORead(fifo, work, Int32(requestedFrames)))
         if received >= max(2, frames / 2) {
@@ -188,10 +222,6 @@ final class AudioRenderState: @unchecked Sendable {
             let sample = work[i]
             let magnitude = abs(sample)
             if magnitude > 0.90 {
-                // This curve meets the dry signal at 0.90 with matching
-                // slope and approaches 0.98 smoothly. The previous branch
-                // jumped from 0.98 to about 0.75 at the threshold, carving
-                // audible notches into loud notes and the amp/beat mix.
                 let limited = 0.90 + 0.08 * tanhf((magnitude - 0.90) / 0.08)
                 work[i] = copysignf(limited, sample)
             }
@@ -206,6 +236,46 @@ final class AudioRenderState: @unchecked Sendable {
 
     func fifoStats() -> AmpAudioFIFOStats {
         AmpAudioFIFOGetStats(fifo)
+    }
+
+    private func copyAutoChannel(left: UnsafePointer<Float>, right: UnsafePointer<Float>, frames: Int) {
+        let src = pickAutoSource(left: left, right: right, frames: frames)
+        memcpy(capture, src, frames * MemoryLayout<Float>.size)
+    }
+
+    private func copyAutoInterleaved(_ data: UnsafePointer<Float>, channels: Int, frames: Int) {
+        var e0: Float = 0
+        var e1: Float = 0
+        for frame in 0..<frames {
+            e0 += abs(data[frame * channels])
+            e1 += abs(data[frame * channels + 1])
+        }
+        updateAutoPick(e0: e0 / Float(frames), e1: e1 / Float(frames))
+        let offset = autoUseRight ? 1 : 0
+        for frame in 0..<frames {
+            capture[frame] = data[frame * channels + offset]
+        }
+    }
+
+    private func pickAutoSource(left: UnsafePointer<Float>, right: UnsafePointer<Float>, frames: Int) -> UnsafePointer<Float> {
+        var e0: Float = 0
+        var e1: Float = 0
+        for i in 0..<frames {
+            e0 += abs(left[i])
+            e1 += abs(right[i])
+        }
+        updateAutoPick(e0: e0 / Float(frames), e1: e1 / Float(frames))
+        return autoUseRight ? right : left
+    }
+
+    private func updateAutoPick(e0: Float, e1: Float) {
+        autoEnv0 += 0.04 * (e0 - autoEnv0)
+        autoEnv1 += 0.04 * (e1 - autoEnv1)
+        if autoEnv1 > autoEnv0 * 2.2 {
+            autoUseRight = true
+        } else if autoEnv0 > autoEnv1 * 2.2 {
+            autoUseRight = false
+        }
     }
 
     private func interpolateInput(sourceFrames: Int, destinationFrames: Int) {

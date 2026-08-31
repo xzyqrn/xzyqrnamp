@@ -10,6 +10,7 @@
 #include "Delay.hpp"
 #include "Drive.hpp"
 #include "NoiseGate.hpp"
+#include "NoiseReduction.hpp"
 #include "Resampler.hpp"
 #include "Reverb.hpp"
 #include "Tuner.hpp"
@@ -28,7 +29,6 @@
 #include <exception>
 #include <filesystem>
 #include <memory>
-#include <mutex>
 #include <string>
 #include <vector>
 
@@ -37,6 +37,111 @@ namespace {
 float dbToLin(float db) { return std::pow(10.0f, db / 20.0f); }
 
 } // namespace
+
+constexpr int kMaxRenderFrames = 4096;
+constexpr int kWorkCapacity = kMaxRenderFrames * 4;
+
+// Three-slot publication so the audio thread never skips a block while a
+// model loads, and so destructors always run on the thread that publishes
+// (main / tests), never inside the render callback.
+template <typename T>
+struct TripleSlot {
+    std::shared_ptr<T> slots[3];
+    std::atomic<int> published{0};
+    std::atomic<int> inUse{0};
+
+    T *acquire() {
+        const int i = published.load(std::memory_order_acquire);
+        inUse.store(i, std::memory_order_release);
+        return slots[i].get();
+    }
+
+    T *peek() const {
+        const int i = published.load(std::memory_order_acquire);
+        return slots[i].get();
+    }
+
+    void publish(std::shared_ptr<T> next) {
+        const int pub = published.load(std::memory_order_relaxed);
+        const int use = inUse.load(std::memory_order_acquire);
+        int idx = 0;
+        while (idx == pub || idx == use)
+            ++idx;
+        slots[idx] = std::move(next);
+        published.store(idx, std::memory_order_release);
+    }
+
+    void resetEngine(double sampleRate, int maxBlock) {
+        if (T *item = peek())
+            item->resetEngine(sampleRate, maxBlock);
+    }
+};
+
+struct PreparedNAM {
+    std::unique_ptr<nam::DSP> dsp;
+    CubicResampler toNam;
+    CubicResampler fromNam;
+    double expectedRate = -1.0;
+    std::vector<float> namFloatIn;
+    std::vector<float> namFloatOut;
+    std::vector<NAM_SAMPLE> namIn;
+    std::vector<NAM_SAMPLE> namOut;
+
+    void allocate(int cap) {
+        namFloatIn.assign(cap, 0.0f);
+        namFloatOut.assign(cap, 0.0f);
+        namIn.assign(cap, NAM_SAMPLE(0));
+        namOut.assign(cap, NAM_SAMPLE(0));
+    }
+
+    void resetEngine(double engineRate, int maxBlock) {
+        if (!dsp)
+            return;
+        const double modelRate = dsp->GetExpectedSampleRate() > 0 ? dsp->GetExpectedSampleRate() : engineRate;
+        expectedRate = dsp->GetExpectedSampleRate();
+        toNam.setRates(engineRate, modelRate);
+        fromNam.setRates(modelRate, engineRate);
+        toNam.reset();
+        fromNam.reset();
+        dsp->Reset(modelRate, std::max(maxBlock * 4, kWorkCapacity));
+    }
+
+    bool canRender(int frames) const {
+        return dsp && frames > 0 && frames <= (int)namFloatIn.size() && frames <= (int)namIn.size();
+    }
+};
+
+void renderNAM(PreparedNAM &nam, float *buffer, int frames) {
+    if (!nam.canRender(frames))
+        return;
+    NAM_SAMPLE *inPtr = nam.namIn.data();
+    NAM_SAMPLE *outPtr = nam.namOut.data();
+    if (nam.toNam.needsConvert()) {
+        const int namTarget = std::min(nam.toNam.calcOutFrames(frames), (int)nam.namFloatIn.size());
+        const int namFrames = nam.toNam.process(buffer, frames, nam.namFloatIn.data(), namTarget);
+        const int safe = std::min(namFrames, (int)nam.namIn.size());
+        for (int i = 0; i < safe; ++i)
+            nam.namIn[i] = (NAM_SAMPLE)nam.namFloatIn[i];
+        nam.dsp->process(&inPtr, &outPtr, safe);
+        for (int i = 0; i < safe; ++i)
+            nam.namFloatOut[i] = (float)nam.namOut[i];
+        nam.fromNam.process(nam.namFloatOut.data(), safe, buffer, frames);
+    } else {
+        for (int i = 0; i < frames; ++i)
+            nam.namIn[i] = (NAM_SAMPLE)buffer[i];
+        nam.dsp->process(&inPtr, &outPtr, frames);
+        for (int i = 0; i < frames; ++i)
+            buffer[i] = (float)nam.namOut[i];
+    }
+}
+
+struct PreparedCabinet {
+    CabinetIR cabinet;
+
+    void resetEngine(double sampleRate, int maxBlock) {
+        cabinet.setEngineRate(sampleRate, maxBlock);
+    }
+};
 
 struct AmpAudioFIFOImpl {
     explicit AmpAudioFIFOImpl(int requestedCapacity)
@@ -69,37 +174,38 @@ public:
     }
     void reset() {
         subsonicFilter.reset();
-        ultrasonicFilter.reset();
+        for (auto &notch : humNotch)
+            notch.reset();
     }
     inline void process(float *buffer, int frames) {
         for (int i = 0; i < frames; ++i) {
             float x = buffer[i];
             x = subsonicFilter.tick(x);
-            x = ultrasonicFilter.tick(x);
+            for (auto &notch : humNotch)
+                x = notch.tick(x);
             buffer[i] = x;
         }
     }
 private:
     double sampleRate = 48000.0;
-    Biquad subsonicFilter, ultrasonicFilter;
+    Biquad subsonicFilter;
+    Biquad humNotch[4];
     void refresh() {
-        // Fixed 50/60 Hz notches also remove played bass fundamentals and
-        // their first harmonics. Keep only inaudible edge filtering here;
-        // the noise gate handles mains hum while the player is idle.
         subsonicFilter.set(Biquad::Type::HighPass, 18.0f, 0.0f, 0.7071f, sampleRate);
-        const float top = std::min(16000.0f, static_cast<float>(sampleRate * 0.45));
-        ultrasonicFilter.set(Biquad::Type::LowPass, top, 0.0f, 0.7071f, sampleRate);
+        // Narrow notches so A (55 Hz) and B (61.7 Hz) stay, while analog
+        // jack mains hum at 50/60 Hz and their first harmonics do not.
+        constexpr float freqs[4] = {50.0f, 60.0f, 100.0f, 120.0f};
+        for (int i = 0; i < 4; ++i)
+            humNotch[i].set(Biquad::Type::Notch, freqs[i], 0.0f, 28.0f, sampleRate);
     }
 };
 
 struct AmpProcessorImpl {
 
-    std::mutex modelMutex;
-    std::mutex cabinetMutex;
-    std::unique_ptr<nam::DSP> model;
-    double namExpectedRate = -1.0;
+    TripleSlot<PreparedNAM> namSlot;
+    TripleSlot<PreparedCabinet> cabinetSlot;
+    std::atomic<double> namExpectedRate{-1.0};
 
-    CabinetIR cabinet;
     NoiseGate gate;
     ToneEQ eq;
     Tuner tuner;
@@ -115,17 +221,13 @@ struct AmpProcessorImpl {
     DelayFX delay;
     Reverb reverb;
     InputConditioner inputConditioner;
-    CubicResampler toNam;
-    CubicResampler fromNam;
+    NoiseReduction noiseReduction;
 
     std::vector<float> work;
-    std::vector<float> namFloatIn;
-    std::vector<float> namFloatOut;
-    std::vector<NAM_SAMPLE> namIn;
-    std::vector<NAM_SAMPLE> namOut;
 
     double engineRate = 48000.0;
     int maxBlock = 512;
+    int maxRenderFrames = kMaxRenderFrames;
 
     std::atomic<float> inputGain{1.0f};
     std::atomic<float> outputGain{1.0f};
@@ -136,10 +238,13 @@ struct AmpProcessorImpl {
     std::atomic<int> midFreqIndex{1}; // 450 Hz default
     std::atomic<bool> ultraLoOn{false};
     std::atomic<bool> ultraHiOn{false};
-    std::atomic<bool> gateOn{true};
-    std::atomic<bool> namOn{true};
-    std::atomic<bool> irOn{true};
-    std::atomic<bool> eqOn{true};
+    std::atomic<bool> gateOn{false};
+    std::atomic<bool> expanderOn{false};
+    std::atomic<bool> nrOn{false};
+    std::atomic<bool> namOn{false};
+    std::atomic<bool> cleanAmpOn{false};
+    std::atomic<bool> irOn{false};
+    std::atomic<bool> eqOn{false};
     std::atomic<bool> bypass{false};
 
     std::atomic<bool> compOn{false};
@@ -183,6 +288,7 @@ struct AmpProcessorImpl {
     std::atomic<float> inputPeak{0};
     std::atomic<float> outputPeak{0};
     std::atomic<float> inputRmsDb{-120.0f};
+    std::atomic<float> inputPeakDb{-120.0f};
     std::atomic<float> noiseFloorDb{-120.0f};
     std::atomic<bool> inputClip{false};
     std::atomic<bool> outputClip{false};
@@ -191,26 +297,14 @@ struct AmpProcessorImpl {
     float outEnv = 0;
     float noiseFloorLinear = 0;
 
-    void ensureBuffers(int frames) {
-        const int cap = std::max(maxBlock * 4, frames * 4);
-        if ((int)work.size() < cap)
-            work.resize(cap);
-        if ((int)namFloatIn.size() < cap)
-            namFloatIn.resize(cap);
-        if ((int)namFloatOut.size() < cap)
-            namFloatOut.resize(cap);
-        if ((int)namIn.size() < cap)
-            namIn.resize(cap);
-        if ((int)namOut.size() < cap)
-            namOut.resize(cap);
+    bool buffersReady(int frames) const {
+        return frames > 0 && frames <= maxRenderFrames && (int)work.size() >= frames;
     }
 
     void applyReset() {
-        work.assign(std::max(maxBlock * 4, 2048), 0.0f);
-        namFloatIn.assign(work.size(), 0.0f);
-        namFloatOut.assign(work.size(), 0.0f);
-        namIn.assign(work.size(), 0.0);
-        namOut.assign(work.size(), 0.0);
+        maxRenderFrames = std::max(kMaxRenderFrames, maxBlock);
+        const int cap = std::max(maxRenderFrames * 4, kWorkCapacity);
+        work.assign(cap, 0.0f);
         gate.setSampleRate(engineRate);
         gate.reset();
         eq.setSampleRate(engineRate);
@@ -238,29 +332,22 @@ struct AmpProcessorImpl {
         reverb.reset();
         inputConditioner.setSampleRate(engineRate);
         inputConditioner.reset();
-        {
-            std::lock_guard<std::mutex> lock(cabinetMutex);
-            cabinet.setEngineRate(engineRate, maxBlock);
-        }
-        toNam.reset();
-        fromNam.reset();
+        noiseReduction.prepare(engineRate, maxRenderFrames);
+        cabinetSlot.resetEngine(engineRate, maxRenderFrames);
+        namSlot.resetEngine(engineRate, maxRenderFrames);
+        if (PreparedNAM *nam = namSlot.peek())
+            namExpectedRate.store(nam->expectedRate, std::memory_order_relaxed);
+        else
+            namExpectedRate.store(-1.0, std::memory_order_relaxed);
         inEnv = outEnv = 0;
         inputPeak.store(0, std::memory_order_relaxed);
         outputPeak.store(0, std::memory_order_relaxed);
         inputRmsDb.store(-120.0f, std::memory_order_relaxed);
+        inputPeakDb.store(-120.0f, std::memory_order_relaxed);
         noiseFloorDb.store(-120.0f, std::memory_order_relaxed);
         inputClip.store(false, std::memory_order_relaxed);
         outputClip.store(false, std::memory_order_relaxed);
         noiseFloorLinear = 0;
-
-        std::lock_guard<std::mutex> lock(modelMutex);
-        if (model) {
-            const double modelRate = model->GetExpectedSampleRate() > 0 ? model->GetExpectedSampleRate() : engineRate;
-            namExpectedRate = model->GetExpectedSampleRate();
-            toNam.setRates(engineRate, modelRate);
-            fromNam.setRates(modelRate, engineRate);
-            model->Reset(modelRate, std::max(maxBlock * 4, 2048));
-        }
     }
 };
 
@@ -292,18 +379,12 @@ bool AmpProcessorLoadNAM(void *opaque, const char *path, char *err, int errLen) 
         if (loaded->NumInputChannels() != 1 || loaded->NumOutputChannels() != 1)
             throw std::runtime_error("This capture is not a mono amp model");
 
-        const double modelRate = loaded->GetExpectedSampleRate() > 0 ? loaded->GetExpectedSampleRate() : p->engineRate;
-        loaded->Reset(modelRate, std::max(p->maxBlock * 4, 2048));
-
-        {
-            std::lock_guard<std::mutex> lock(p->modelMutex);
-            p->model = std::move(loaded);
-            p->namExpectedRate = p->model->GetExpectedSampleRate();
-            p->toNam.setRates(p->engineRate, modelRate);
-            p->fromNam.setRates(modelRate, p->engineRate);
-            p->toNam.reset();
-            p->fromNam.reset();
-        }
+        auto prepared = std::make_shared<PreparedNAM>();
+        prepared->dsp = std::move(loaded);
+        prepared->allocate(std::max(p->maxRenderFrames * 4, kWorkCapacity));
+        prepared->resetEngine(p->engineRate, p->maxRenderFrames);
+        p->namExpectedRate.store(prepared->expectedRate, std::memory_order_relaxed);
+        p->namSlot.publish(std::move(prepared));
         return true;
     } catch (const std::exception &e) {
         if (err && errLen > 0)
@@ -316,47 +397,48 @@ void AmpProcessorUnloadNAM(void *opaque) {
     auto *p = asProc(opaque);
     if (!p)
         return;
-    std::lock_guard<std::mutex> lock(p->modelMutex);
-    p->model.reset();
-    p->namExpectedRate = -1.0;
+    p->namSlot.publish(nullptr);
+    p->namExpectedRate.store(-1.0, std::memory_order_relaxed);
 }
 
 bool AmpProcessorHasNAM(void *opaque) {
     auto *p = asProc(opaque);
-    return p && p->model != nullptr;
+    return p && p->namSlot.peek() != nullptr;
 }
 
 double AmpProcessorNAMSampleRate(void *opaque) {
     auto *p = asProc(opaque);
     if (!p)
         return -1.0;
-    return p->namExpectedRate;
+    return p->namExpectedRate.load(std::memory_order_relaxed);
 }
 
 bool AmpProcessorLoadIR(void *opaque, const float *samples, int length, double sampleRate) {
     auto *p = asProc(opaque);
     if (!p || !samples || length <= 0)
         return false;
-    std::lock_guard<std::mutex> lock(p->cabinetMutex);
-    p->cabinet.setIR(samples, length, sampleRate);
-    p->cabinet.setEngineRate(p->engineRate, p->maxBlock);
-    return p->cabinet.hasIR();
+    auto prepared = std::make_shared<PreparedCabinet>();
+    prepared->cabinet.setIR(samples, length, sampleRate);
+    prepared->cabinet.setEngineRate(p->engineRate, p->maxRenderFrames);
+    if (!prepared->cabinet.hasIR())
+        return false;
+    p->cabinetSlot.publish(std::move(prepared));
+    return true;
 }
 
 void AmpProcessorUnloadIR(void *opaque) {
     auto *p = asProc(opaque);
-    if (p) {
-        std::lock_guard<std::mutex> lock(p->cabinetMutex);
-        p->cabinet.clear();
-    }
+    if (p)
+        p->cabinetSlot.publish(nullptr);
 }
 
 bool AmpProcessorHasIR(void *opaque) {
     auto *p = asProc(opaque);
     if (!p)
         return false;
-    std::lock_guard<std::mutex> lock(p->cabinetMutex);
-    return p->cabinet.hasIR();
+    if (PreparedCabinet *cabinet = p->cabinetSlot.peek())
+        return cabinet->cabinet.hasIR();
+    return false;
 }
 
 void AmpProcessorReset(void *opaque, double sampleRate, int maxBlock) {
@@ -378,7 +460,17 @@ void AmpProcessorProcess(void *opaque, const float *input, float *output, int fr
         return;
     }
 
-    p->ensureBuffers(frames);
+    if (!p->buffersReady(frames)) {
+        // Never allocate on the render path. Pass through or mute if a
+        // callback is larger than the preallocated workspace.
+        if (output) {
+            if (input)
+                std::memcpy(output, input, frames * sizeof(float));
+            else
+                std::memset(output, 0, frames * sizeof(float));
+        }
+        return;
+    }
     float *work = p->work.data();
     std::memcpy(work, input, frames * sizeof(float));
 
@@ -395,6 +487,8 @@ void AmpProcessorProcess(void *opaque, const float *input, float *output, int fr
     vDSP_rmsqv(work, 1, &rmsIn, frames);
     const float rmsDb = 20.0f * std::log10(std::max(rmsIn, 1.0e-6f));
     p->inputRmsDb.store(std::max(-120.0f, rmsDb), std::memory_order_relaxed);
+    const float peakDb = 20.0f * std::log10(std::max(peakIn, 1.0e-6f));
+    p->inputPeakDb.store(std::max(-120.0f, peakDb), std::memory_order_relaxed);
 
     // Estimate the idle analog noise floor only while no strong note is
     // present. It falls quickly after playing stops and rises slowly so a
@@ -412,8 +506,7 @@ void AmpProcessorProcess(void *opaque, const float *input, float *output, int fr
     float inBandEnv = 0.0f;
     for (int i = 0; i < frames; ++i)
         inBandEnv = p->inBand.tick(work[i]);
-    const float inLinear = std::max(inBandEnv, peakIn);
-    const float inMeterVal = BassBand::toMeter(inLinear);
+    const float inMeterVal = BassBand::toMeter(inBandEnv);
     if (inMeterVal > p->inEnv)
         p->inEnv = inMeterVal;
     else
@@ -428,8 +521,7 @@ void AmpProcessorProcess(void *opaque, const float *input, float *output, int fr
         float bypassBand = 0.0f;
         for (int i = 0; i < frames; ++i)
             bypassBand = p->outBand.tick(work[i]);
-        const float bypassLinear = std::max(bypassBand, peakIn);
-        const float bypassMeterVal = BassBand::toMeter(bypassLinear);
+        const float bypassMeterVal = BassBand::toMeter(bypassBand);
         if (bypassMeterVal > p->outEnv)
             p->outEnv = bypassMeterVal;
         else
@@ -440,6 +532,13 @@ void AmpProcessorProcess(void *opaque, const float *input, float *output, int fr
         return;
     }
 
+    // Continuous spectral noise reduction. The analog jack path carries a
+    // 60 Hz buzz comb and broadband switching hash at all times; a gate or
+    // expander lets it back in with every note, so it has to be subtracted
+    // from the spectrum instead. Never runs on Raw DI (bypass above).
+    if (p->nrOn.load(std::memory_order_relaxed))
+        p->noiseReduction.process(work, frames);
+
     // Input trim is part of the preamp and must precede the gate detector.
     // With trim after the gate, quiet passive basses could never open the
     // gate no matter how far the Gain control was turned up.
@@ -447,7 +546,12 @@ void AmpProcessorProcess(void *opaque, const float *input, float *output, int fr
     vDSP_vsmul(work, 1, &inG, work, 1, frames);
 
     if (p->gateOn.load(std::memory_order_relaxed)) {
+        p->gate.setExpander(false);
         p->gate.setThresholdDb(p->gateThresholdDb.load(std::memory_order_relaxed));
+        p->gate.process(work, frames);
+    } else if (p->expanderOn.load(std::memory_order_relaxed)) {
+        p->gate.setExpander(true);
+        p->gate.setNoiseFloorDb(p->noiseFloorDb.load(std::memory_order_relaxed));
         p->gate.process(work, frames);
     }
 
@@ -484,37 +588,18 @@ void AmpProcessorProcess(void *opaque, const float *input, float *output, int fr
     }
 
     if (p->namOn.load(std::memory_order_relaxed)) {
-        std::unique_lock<std::mutex> lock(p->modelMutex, std::try_to_lock);
-        if (lock.owns_lock()) {
-            if (p->model) {
-                NAM_SAMPLE *inPtr = p->namIn.data();
-                NAM_SAMPLE *outPtr = p->namOut.data();
-                if (p->toNam.needsConvert()) {
-                    const int namTarget = p->toNam.calcOutFrames(frames);
-                    const int namFrames = p->toNam.process(work, frames, p->namFloatIn.data(), namTarget);
-                    for (int i = 0; i < namFrames; ++i)
-                        p->namIn[i] = (NAM_SAMPLE)p->namFloatIn[i];
-                    p->model->process(&inPtr, &outPtr, namFrames);
-                    for (int i = 0; i < namFrames; ++i)
-                        p->namFloatOut[i] = (float)p->namOut[i];
-                    p->fromNam.process(p->namFloatOut.data(), namFrames, work, frames);
-                } else {
-                    for (int i = 0; i < frames; ++i)
-                        p->namIn[i] = (NAM_SAMPLE)work[i];
-                    p->model->process(&inPtr, &outPtr, frames);
-                    for (int i = 0; i < frames; ++i)
-                        work[i] = (float)p->namOut[i];
-                }
-            } else {
-                p->cleanAmp.process(work, frames);
-            }
+        if (PreparedNAM *nam = p->namSlot.acquire()) {
+            renderNAM(*nam, work, frames);
+        } else if (p->cleanAmpOn.load(std::memory_order_relaxed)) {
+            p->cleanAmp.process(work, frames);
         }
     }
 
     if (p->irOn.load(std::memory_order_relaxed)) {
-        std::unique_lock<std::mutex> lock(p->cabinetMutex, std::try_to_lock);
-        if (lock.owns_lock() && p->cabinet.hasIR())
-            p->cabinet.process(work, work, frames);
+        if (PreparedCabinet *cabinet = p->cabinetSlot.acquire()) {
+            if (cabinet->cabinet.hasIR())
+                cabinet->cabinet.process(work, work, frames);
+        }
     }
 
     if (p->eqOn.load(std::memory_order_relaxed)) {
@@ -580,8 +665,7 @@ void AmpProcessorProcess(void *opaque, const float *input, float *output, int fr
     float outBandEnv = 0.0f;
     for (int i = 0; i < frames; ++i)
         outBandEnv = p->outBand.tick(work[i]);
-    const float outLinear = std::max(outBandEnv, peakOut);
-    const float outMeterVal = BassBand::toMeter(outLinear);
+    const float outMeterVal = BassBand::toMeter(outBandEnv);
     if (outMeterVal > p->outEnv)
         p->outEnv = outMeterVal;
     else
@@ -633,9 +717,25 @@ void AmpProcessorSetGateOn(void *opaque, bool on) {
     if (auto *p = asProc(opaque))
         p->gateOn.store(on);
 }
+void AmpProcessorSetNROn(void *opaque, bool on) {
+    if (auto *p = asProc(opaque))
+        p->nrOn.store(on);
+}
+void AmpProcessorSetExpanderOn(void *opaque, bool on) {
+    if (auto *p = asProc(opaque))
+        p->expanderOn.store(on);
+}
 void AmpProcessorSetNAMOn(void *opaque, bool on) {
     if (auto *p = asProc(opaque))
         p->namOn.store(on);
+}
+void AmpProcessorSetCleanAmpOn(void *opaque, bool on) {
+    if (auto *p = asProc(opaque))
+        p->cleanAmpOn.store(on);
+}
+bool AmpProcessorCleanAmpOn(void *opaque) {
+    auto *p = asProc(opaque);
+    return p && p->cleanAmpOn.load(std::memory_order_relaxed);
 }
 void AmpProcessorSetIROn(void *opaque, bool on) {
     if (auto *p = asProc(opaque))
@@ -774,6 +874,7 @@ AmpMeterState AmpProcessorGetMeters(void *opaque) {
     s.inputPeak = p->inputPeak.load();
     s.outputPeak = p->outputPeak.load();
     s.inputRmsDb = p->inputRmsDb.load();
+    s.inputPeakDb = p->inputPeakDb.load();
     s.noiseFloorDb = p->noiseFloorDb.load();
     s.inputClip = p->inputClip.load();
     s.outputClip = p->outputClip.load();
@@ -867,6 +968,23 @@ AmpAudioFIFOStats AmpAudioFIFOGetStats(void *opaque) {
     stats.underflowFrames = fifo->underflowFrames.load(std::memory_order_relaxed);
     stats.availableFrames = AmpAudioFIFOAvailable(opaque);
     return stats;
+}
+
+int AmpAudioFIFORequestFrames(int available, int outputFrames, int target, bool sharedClock) {
+    if (outputFrames <= 0)
+        return 0;
+    if (sharedClock)
+        return outputFrames;
+    const int goal = std::max(target, outputFrames);
+    const int error = available - goal;
+    const int deadzone = std::max(32, outputFrames / 4);
+    if (std::abs(error) <= deadzone)
+        return outputFrames;
+    if (error > 0)
+        return outputFrames + 1;
+    if (available >= outputFrames)
+        return std::max(2, outputFrames - 1);
+    return outputFrames;
 }
 
 void *AmpRecorderStateCreate(void) {

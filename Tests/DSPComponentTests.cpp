@@ -8,12 +8,14 @@
 #include "Delay.hpp"
 #include "Drive.hpp"
 #include "NoiseGate.hpp"
+#include "NoiseReduction.hpp"
 #include "Resampler.hpp"
 #include "Reverb.hpp"
 #include "Tuner.hpp"
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <functional>
@@ -107,6 +109,117 @@ void testNoiseGate() {
     gate.reset();
     processInBlocks(gate, quiet);
     expect(rms(quiet, 4096) < 1.0e-7, "gate must close on idle noise");
+}
+
+double binMagnitude(const std::vector<float> &samples, double hz, int start) {
+    double sine = 0;
+    double cosine = 0;
+    int count = 0;
+    for (int i = std::max(0, start); i < static_cast<int>(samples.size()); ++i) {
+        const double t = i / kSampleRate;
+        sine += samples[i] * std::sin(2.0 * M_PI * hz * t);
+        cosine += samples[i] * std::cos(2.0 * M_PI * hz * t);
+        ++count;
+    }
+    if (count <= 0)
+        return 0;
+    return 2.0 * std::sqrt(sine * sine + cosine * cosine) / count;
+}
+
+void testExpander() {
+    NoiseGate expander;
+    expander.setSampleRate(kSampleRate);
+    expander.setExpander(true);
+    expander.setNoiseFloorDb(-48.0f);
+    expander.reset();
+
+    std::vector<float> hiss(kFrames);
+    for (int i = 0; i < kFrames; ++i)
+        hiss[i] = 0.012f * std::sin(2.0 * M_PI * 12000.0 * i / kSampleRate);
+    processInBlocks(expander, hiss);
+    expect(rms(hiss, 12000) < 0.004, "expander must duck idle analog hiss");
+
+    expander.reset();
+    std::vector<float> noise(kFrames);
+    uint32_t rng = 1;
+    for (int i = 0; i < kFrames; ++i) {
+        rng = rng * 1664525u + 1013904223u;
+        noise[i] = (static_cast<int32_t>(rng) / 2147483648.0f) * 0.04f;
+    }
+    processInBlocks(expander, noise);
+    expect(rms(noise, 12000) < 0.008, "expander must duck broadband analog hiss");
+
+    auto note = bassSignal(0.20f);
+    expander.reset();
+    processInBlocks(expander, note);
+    expect(finite(note), "expander output must remain finite");
+    expect(rms(note, 4096) > 0.03, "expander must pass a played bass note");
+
+    expander.reset();
+    std::vector<float> mixed(kFrames);
+    for (int i = 0; i < kFrames; ++i) {
+        const double t = i / kSampleRate;
+        mixed[i] = static_cast<float>(
+            0.20 * std::sin(2.0 * M_PI * 110.0 * t)
+            + 0.03 * std::sin(2.0 * M_PI * 12000.0 * t));
+    }
+    processInBlocks(expander, mixed);
+    expect(binMagnitude(mixed, 110.0, 12000) > 0.10, "expander must keep a bass note while hiss is present");
+    expect(binMagnitude(mixed, 12000.0, 12000) < 0.012, "expander must keep analog hiss down while playing");
+}
+
+void testNoiseReduction() {
+    // Stationary analog-jack noise as it reaches this stage: 60 Hz buzz
+    // harmonics plus broadband hiss. The 50/60/100/120 Hz fundamentals are
+    // already removed by the notch bank ahead of it, so start at the third
+    // harmonic, matching the measured iRig/headset-jack floor.
+    auto makeNoise = [](int frames) {
+        std::vector<float> result(frames);
+        uint32_t rng = 7;
+        for (int i = 0; i < frames; ++i) {
+            const double t = i / kSampleRate;
+            double buzz = 0.0;
+            for (int h = 3; h <= 33; h += 2)
+                buzz += std::sin(2.0 * M_PI * 60.0 * h * t) / h;
+            rng = rng * 1664525u + 1013904223u;
+            const float hiss = (static_cast<int32_t>(rng) / 2147483648.0f) * 0.008f;
+            result[i] = static_cast<float>(0.02 * buzz) + hiss;
+        }
+        return result;
+    };
+
+    NoiseReduction nr;
+    nr.prepare(kSampleRate, 512);
+
+    auto idle = makeNoise(kFrames * 2);
+    const double idleInRms = rms(idle, kFrames);
+    processInBlocks(nr, idle);
+    const double idleOutRms = rms(idle, kFrames);
+    expect(finite(idle), "noise reduction output must remain finite");
+    expect(idleOutRms < idleInRms * 0.35,
+           "noise reduction must cut stationary buzz and hiss by at least 9 dB");
+
+    // A bass note starting after the noise profile is learned must pass
+    // nearly untouched while the noise between its harmonics stays down.
+    nr.reset();
+    auto mixed = makeNoise(kFrames * 2);
+    for (int i = kFrames; i < kFrames * 2; ++i) {
+        const double t = (i - kFrames) / kSampleRate;
+        const double attack = std::min(1.0, (i - kFrames) / 480.0);
+        mixed[i] += static_cast<float>(attack * 0.16
+            * (std::sin(2.0 * M_PI * 110.0 * t) + 0.35 * std::sin(2.0 * M_PI * 220.0 * t)));
+    }
+    processInBlocks(nr, mixed);
+    expect(finite(mixed), "noise reduction must stay finite with a note present");
+    const double noteMag = binMagnitude(mixed, 110.0, kFrames + 12000);
+    expect(noteMag > 0.10, "noise reduction must pass a played bass note");
+
+    // Silence must stay silent and never generate output on its own.
+    nr.reset();
+    std::vector<float> silence(kFrames, 0.0f);
+    processInBlocks(nr, silence);
+    expect(finite(silence), "noise reduction must remain finite on silence");
+    expect(rms(silence, 4096) < 1.0e-6, "noise reduction must not generate noise from silence");
 }
 
 void testCompressor() {
@@ -295,6 +408,8 @@ void testResampler() {
 int main() {
     testToneEQ();
     testNoiseGate();
+    testExpander();
+    testNoiseReduction();
     testCompressor();
     testDrive();
     testBassOctaver();

@@ -22,6 +22,7 @@ private struct LiveMetrics {
     var inputPeak: Double = 0
     var outputPeak: Double = 0
     var inputRmsDb: Double = -120
+    var inputPeakDb: Double = -120
     var noiseFloorDb: Double = -120
     var audioDiagnostic = "Power on, then stop playing for a moment to measure the input."
     var inputClip = false
@@ -30,6 +31,10 @@ private struct LiveMetrics {
     var tunerConfidence: Double = 0
     var recordElapsed: TimeInterval = 0
     var recordPeak: Double = 0
+    var fifoAvailable: Int = 0
+    var fifoUnderflowFrames: UInt64 = 0
+    var fifoOverflowFrames: UInt64 = 0
+    var clockCondition = "Unknown"
 }
 
 @MainActor
@@ -41,28 +46,32 @@ final class AmpSession: ObservableObject {
     @Published var inputDeviceID: AudioDeviceID = CoreAudioDevices.defaultInputID()
     @Published var outputDeviceID: AudioDeviceID = CoreAudioDevices.defaultOutputID()
     @Published var bufferSize: UInt32 = 128
-    /// 0 means Channel 1 (Default / Left), 1 means Channel 2 (Inst 2 / Right), 2 means Sum 1+2.
+    /// 0 Channel 1, 1 Channel 2, 2 Sum 1+2, 3 Auto (stronger channel, never sums).
     @Published var inputChannel: Int = 0
     /// 0 means follow whatever the jack / interface is already using.
     @Published var sampleRate: Double = 0
     @Published var hardwareSampleRate: Double = 48000
     @Published var hardwareBuffer: UInt32 = 256
     @Published var latencyMs: Double = 0
+    @Published var latencyIsEstimated = true
 
-    @Published var inputGainDb: Double = 3
-    @Published var outputGainDb: Double = 0
+    @Published var inputGainDb: Double = 0
+    @Published var outputGainDb: Double = -3
     @Published var gateThresholdDb: Double = -40
-    @Published var bassDb: Double = 1.5
+    @Published var bassDb: Double = 0
     @Published var midDb: Double = 0
-    @Published var trebleDb: Double = -1.5
+    @Published var trebleDb: Double = 0
     @Published var midFreqIndex: Int = 1 // 0: 220Hz, 1: 450Hz, 2: 800Hz, 3: 1.6kHz, 4: 3.0kHz
     @Published var ultraLoOn = false
     @Published var ultraHiOn = false
     @Published var selectedCabinet = "bass-4x10.wav"
-    @Published var gateOn = true
-    @Published var namOn = true
-    @Published var irOn = true
-    @Published var eqOn = true
+    @Published var gateOn = false
+    @Published var expanderOn = true
+    @Published var nrOn = true
+    @Published var namOn = false
+    @Published var cleanAmpOn = false
+    @Published var irOn = false
+    @Published var eqOn = false
     @Published var bypass = false
 
     static let availableCabinets: [(id: String, name: String)] = [
@@ -72,7 +81,7 @@ final class AmpSession: ObservableObject {
         ("bass-1x15.wav", "Aguilar DB 1x15"),
     ]
 
-    @Published var compOn = true
+    @Published var compOn = false
     @Published var compThresholdDb: Double = -24
     @Published var compRatio: Double = 4
     @Published var compMakeupDb: Double = 2
@@ -92,8 +101,8 @@ final class AmpSession: ObservableObject {
     @Published var envelopeMix: Double = 0.65
 
     @Published var utilityFilterOn = true
-    @Published var highPassHz: Double = 32
-    @Published var lowPassHz: Double = 12000
+    @Published var highPassHz: Double = 25
+    @Published var lowPassHz: Double = 16000
 
     @Published var chorusOn = false
     @Published var chorusRate: Double = 0.8
@@ -110,7 +119,7 @@ final class AmpSession: ObservableObject {
     @Published var reverbDamp: Double = 0.45
     @Published var reverbMix: Double = 0.2
 
-    @Published var namName = "xzyqrn Clean"
+    @Published var namName = "Passthrough"
     @Published var irName = "No cabinet"
     @Published var namPath: URL?
     @Published var irPath: URL?
@@ -119,8 +128,13 @@ final class AmpSession: ObservableObject {
     var inputPeak: Double { liveMetrics.inputPeak }
     var outputPeak: Double { liveMetrics.outputPeak }
     var inputRmsDb: Double { liveMetrics.inputRmsDb }
+    var inputPeakDb: Double { liveMetrics.inputPeakDb }
     var noiseFloorDb: Double { liveMetrics.noiseFloorDb }
     var audioDiagnostic: String { liveMetrics.audioDiagnostic }
+    var fifoAvailable: Int { liveMetrics.fifoAvailable }
+    var fifoUnderflowFrames: UInt64 { liveMetrics.fifoUnderflowFrames }
+    var fifoOverflowFrames: UInt64 { liveMetrics.fifoOverflowFrames }
+    var clockCondition: String { liveMetrics.clockCondition }
     var inputClip: Bool { liveMetrics.inputClip }
     var outputClip: Bool { liveMetrics.outputClip }
     var tunerHz: Double { liveMetrics.tunerHz }
@@ -154,6 +168,10 @@ final class AmpSession: ObservableObject {
     private var sinkNode: AVAudioSinkNode?
     private var sourceNode: AVAudioSourceNode?
     private var renderState: AudioRenderState?
+    private var analogAggregateID: AudioDeviceID = 0
+    private var analogDuplexRoute = false
+    private var lastFIFOUnderflowFrames: UInt64 = 0
+    private var lastFIFOOverflowFrames: UInt64 = 0
     private var meterTimer: Timer?
     private var hardwareListener: AudioObjectPropertyListenerBlock?
     private var configurationObserver: NSObjectProtocol?
@@ -161,11 +179,10 @@ final class AmpSession: ObservableObject {
     private var currentNAMBookmark: Data?
     private var currentIRBookmark: Data?
     private var isStarting = false
-    private var lastFIFOUnderflowFrames: UInt64 = 0
-    private var lastFIFOOverflowFrames: UInt64 = 0
     private let processor = AmpProcessorShared()!
 
-    static let cleanAmpName = "xzyqrn Clean"
+    static let cleanAmpName = "xzyqrn Vintage Clean"
+    static let passthroughAmpName = "Passthrough"
     private static let lastNAMBookmarkKey = "xzyqrn.lastNAMBookmark"
     private static let lastIRBookmarkKey = "xzyqrn.lastIRBookmark"
 
@@ -307,6 +324,15 @@ final class AmpSession: ObservableObject {
     private func adoptPreferredDevices() {
         inputDeviceID = CoreAudioDevices.preferredInputID(in: devices)
         outputDeviceID = CoreAudioDevices.preferredOutputID(in: devices)
+        if devices.first(where: { $0.id == inputDeviceID })?.isAnalogInput == true {
+            // Never default analog to Sum 1+2: the unused jack channel is
+            // usually open-ADC hiss, and mixing it in makes static that
+            // does not go away when you play or mute.
+            inputChannel = 3
+            if bufferSize < 256 {
+                bufferSize = CoreAudioDevices.clampBuffer(256, device: outputDeviceID)
+            }
+        }
         let inRate = CoreAudioDevices.currentSampleRate(device: inputDeviceID)
         if inRate > 1 {
             hardwareSampleRate = inRate
@@ -373,12 +399,30 @@ final class AmpSession: ObservableObject {
     }
 
     private func startEngine() async throws {
-        stopEngineOnly()
-        try applyHardware()
+        var lastError: Error?
+        // Analog mic + headphones can share a private aggregate. If that
+        // device will not open (sandbox, voice isolation, etc.), fall back
+        // to the split sink/source path that actually starts on this jack.
+        for useAnalogAggregate in [true, false] {
+            do {
+                try await startEngineOnce(useAnalogAggregate: useAnalogAggregate)
+                return
+            } catch {
+                lastError = error
+                stopEngineOnly()
+            }
+        }
+        throw lastError ?? NSError(
+            domain: "xzyqrn amp",
+            code: 11,
+            userInfo: [NSLocalizedDescriptionKey: "Couldn't start audio on this analog route."]
+        )
+    }
 
-        // Core Audio publishes default-device changes asynchronously. A fresh
-        // engine created after that notification avoids retaining device 0 or
-        // the previous route inside its AUHAL.
+    private func startEngineOnce(useAnalogAggregate: Bool) async throws {
+        stopEngineOnly()
+        try applyHardware(useAnalogAggregate: useAnalogAggregate)
+
         try await Task.sleep(nanoseconds: 120_000_000)
         try Task.checkCancellation()
         engine = AVAudioEngine()
@@ -394,9 +438,10 @@ final class AmpSession: ObservableObject {
             processor: processor,
             beatPlayer: beatPlayer,
             recorder: recorder,
-            preRollFrames: Int(max(bufferSize * 2, 256)),
+            preRollFrames: fifoPreRollFrames,
             engineSampleRate: dspRate,
-            inputChannel: inputChannel
+            inputChannel: inputChannel,
+            sharedClock: analogDuplexRoute || inputDeviceID == outputDeviceID
         )
         renderState = state
 
@@ -415,13 +460,9 @@ final class AmpSession: ObservableObject {
         sourceNode = source
 
         engine.connect(engine.inputNode, to: sink, format: inputFormat)
-        // This rig has exactly one playback source. The AVAudioEngine main
-        // mixer initializes at 44.1 kHz on some analog-jack routes and then
-        // inserts 48 -> 44.1 -> 48 conversion despite 48 kHz hardware. Going
-        // directly to the output node keeps the entire live path at one rate.
         engine.connect(source, to: engine.outputNode, format: outputFormat)
 
-        AmpProcessorReset(processor, dspRate, Int32(max(bufferSize, 512)))
+        AmpProcessorReset(processor, dspRate, Int32(max(Int(bufferSize), 4096)))
         if let namPath { _ = loadNAM(url: namPath) }
         if let irPath { _ = loadIR(url: irPath) }
         pushAllParams()
@@ -430,15 +471,19 @@ final class AmpSession: ObservableObject {
         try engine.start()
         isRunning = true
         hardwareSampleRate = dspRate
-        hardwareBuffer = CoreAudioDevices.currentBufferFrameSize(device: outputDeviceID)
+        let routeDevice = analogAggregateID != 0 ? analogAggregateID : outputDeviceID
+        hardwareBuffer = CoreAudioDevices.currentBufferFrameSize(device: routeDevice)
         if hardwareBuffer == 0 {
             hardwareBuffer = CoreAudioDevices.currentBufferFrameSize(device: inputDeviceID)
         }
         if hardwareBuffer == 0 { hardwareBuffer = bufferSize }
-        latencyMs = 1000.0 * Double(hardwareBuffer * 2) / max(hardwareSampleRate, 1)
+        updateEstimatedLatency()
+        let routeName = analogDuplexRoute
+            ? "analog duplex"
+            : (devices.first(where: { $0.id == inputDeviceID })?.name ?? "Input")
         status = String(
             format: "Live · %@ · %.0f Hz · %d samples",
-            devices.first(where: { $0.id == inputDeviceID })?.name ?? "Input",
+            routeName,
             hardwareSampleRate,
             hardwareBuffer
         )
@@ -524,7 +569,7 @@ final class AmpSession: ObservableObject {
                         hardwareBuffer = CoreAudioDevices.currentBufferFrameSize(device: inputDeviceID)
                     }
                     if hardwareBuffer == 0 { hardwareBuffer = bufferSize }
-                    latencyMs = 1000.0 * Double(hardwareBuffer * 2) / max(hardwareSampleRate, 1)
+                    updateEstimatedLatency()
                     status = "Off"
                     errorMessage = nil
                 }
@@ -546,7 +591,10 @@ final class AmpSession: ObservableObject {
         AmpProcessorSetUltraLoOn(processor, ultraLoOn)
         AmpProcessorSetUltraHiOn(processor, ultraHiOn)
         AmpProcessorSetGateOn(processor, gateOn)
+        AmpProcessorSetExpanderOn(processor, expanderOn)
+        AmpProcessorSetNROn(processor, nrOn)
         AmpProcessorSetNAMOn(processor, namOn)
+        AmpProcessorSetCleanAmpOn(processor, cleanAmpOn)
         AmpProcessorSetIROn(processor, irOn)
         AmpProcessorSetEQOn(processor, eqOn)
         AmpProcessorSetBypass(processor, bypass)
@@ -597,10 +645,13 @@ final class AmpSession: ObservableObject {
         var err = [CChar](repeating: 0, count: 512)
         let ok = AmpProcessorLoadNAM(processor, url.path, &err, Int32(err.count))
         if ok {
+            cleanAmpOn = false
+            namOn = true
             namPath = url
             namName = url.deletingPathExtension().lastPathComponent
             rememberExternalResource(url, kind: .nam)
             errorMessage = nil
+            pushAllParams()
         } else {
             let message = String(cString: err)
             errorMessage = message.isEmpty ? "Couldn't load that .nam capture." : message
@@ -648,14 +699,23 @@ final class AmpSession: ObservableObject {
     func unloadNAM() {
         AmpProcessorUnloadNAM(processor)
         namPath = nil
-        namName = Self.cleanAmpName
+        namName = cleanAmpOn ? Self.cleanAmpName : Self.passthroughAmpName
         currentNAMBookmark = nil
         UserDefaults.standard.removeObject(forKey: Self.lastNAMBookmarkKey)
     }
 
+    func clearNAMToPassthrough() {
+        cleanAmpOn = false
+        namOn = false
+        unloadNAM()
+        pushAllParams()
+    }
+
     func useCleanAmp() {
         unloadNAM()
+        cleanAmpOn = true
         namOn = true
+        namName = Self.cleanAmpName
         pushAllParams()
     }
 
@@ -693,7 +753,10 @@ final class AmpSession: ObservableObject {
         midDb = preset.midDb
         trebleDb = preset.trebleDb
         gateOn = preset.gateOn
+        expanderOn = preset.expanderOn
+        nrOn = preset.nrOn
         namOn = preset.namOn
+        cleanAmpOn = preset.cleanAmpOn
         irOn = preset.irOn
         eqOn = preset.eqOn
         compOn = preset.compOn
@@ -729,7 +792,9 @@ final class AmpSession: ObservableObject {
         midFreqIndex = preset.midFreqIndex
         ultraLoOn = preset.ultraLoOn
         ultraHiOn = preset.ultraHiOn
-        selectedCabinet = preset.irFile.isEmpty ? "bass-4x10.wav" : preset.irFile
+        if !preset.irFile.isEmpty {
+            selectedCabinet = preset.irFile
+        }
         pushAllParams()
         if let bookmark = preset.namBookmark {
             if let url = resolveBookmark(bookmark, refreshKey: Self.lastNAMBookmarkKey) {
@@ -742,8 +807,13 @@ final class AmpSession: ObservableObject {
                 resourceErrors.append("Capture “\(preset.namFile)” is no longer available. Reconnect it and save the preset again.")
             }
         } else if Self.isBundledCleanNAM(preset.namFile) || preset.namFile.isEmpty {
-            unloadNAM()
-            pushAllParams()
+            if preset.cleanAmpOn {
+                useCleanAmp()
+            } else {
+                cleanAmpOn = false
+                unloadNAM()
+                pushAllParams()
+            }
         } else if let nam = bundledURL(preset.namFile, ext: "nam", sub: "Models") {
             if !loadNAM(url: nam) {
                 resourceErrors.append("Capture “\(preset.namFile)” could not be loaded: \(errorMessage ?? "unknown error")")
@@ -797,7 +867,10 @@ final class AmpSession: ObservableObject {
             midDb: midDb,
             trebleDb: trebleDb,
             gateOn: gateOn,
+            expanderOn: expanderOn,
+            nrOn: nrOn,
             namOn: namOn,
+            cleanAmpOn: cleanAmpOn,
             irOn: irOn,
             eqOn: eqOn,
             namFile: namPath?.lastPathComponent ?? "",
@@ -845,23 +918,10 @@ final class AmpSession: ObservableObject {
 
     private func loadBundledDefaultsIfNeeded() {
         presets = AmpPreset.bundled + PresetStore.loadAll()
-        if namPath == nil {
-            if let bookmark = UserDefaults.standard.data(forKey: Self.lastNAMBookmarkKey),
-               let url = resolveBookmark(bookmark, refreshKey: Self.lastNAMBookmarkKey),
-               loadNAM(url: url) {
-                // Restored the last external capture.
-            } else {
-                unloadNAM()
-            }
-        }
-        if irPath == nil {
-            if let bookmark = UserDefaults.standard.data(forKey: Self.lastIRBookmarkKey),
-               let url = resolveBookmark(bookmark, refreshKey: Self.lastIRBookmarkKey),
-               loadIR(url: url) {
-                // Restored the last external cabinet.
-            } else if let url = bundledURL("bass-4x10", ext: "wav", sub: "IRs") {
-                _ = loadIR(url: url)
-            }
+        unloadNAM()
+        unloadIR()
+        if let practice = presets.first(where: { $0.id == "practice" }) {
+            applyPreset(practice)
         }
     }
 
@@ -931,36 +991,11 @@ final class AmpSession: ObservableObject {
             ?? Bundle.main.url(forResource: stem, withExtension: ext)
     }
 
-    private func applyHardware() throws {
+    private func applyHardware(useAnalogAggregate: Bool = true) throws {
         try validateSelectedDevices()
-
-        // AVAudioEngine exposes one AUHAL for both I/O nodes. Assigning an
-        // input-only device followed by an output-only device to that same
-        // unit leaves it attached to neither. Route through the system's
-        // paired defaults, then instantiate a fresh engine in startEngine().
-        try check(
-            CoreAudioDevices.setDefaultInput(inputDeviceID),
-            action: "select \(inputLabel) as input"
-        )
-        try check(
-            CoreAudioDevices.setDefaultOutput(outputDeviceID),
-            action: "select \(outputLabel) as output"
-        )
-
-        if devices.first(where: { $0.id == inputDeviceID })?.isAnalogInput == true {
-            CoreAudioDevices.raiseVolumeIfNeeded(
-                device: inputDeviceID,
-                scope: kAudioDevicePropertyScopeInput,
-                minimum: 0.75
-            )
-        }
-        if devices.first(where: { $0.id == outputDeviceID })?.isAnalogOutput == true {
-            CoreAudioDevices.raiseVolumeIfNeeded(
-                device: outputDeviceID,
-                scope: kAudioDevicePropertyScopeOutput,
-                minimum: 0.8
-            )
-        }
+        analogDuplexRoute = false
+        analogAggregateID = 0
+        CoreAudioDevices.destroyAnalogAggregate()
 
         let alignedRate = try alignedSampleRate()
         if let alignedRate {
@@ -970,9 +1005,36 @@ final class AmpSession: ObservableObject {
             }
         }
 
-        CoreAudioDevices.setBufferFrameSize(bufferSize, device: inputDeviceID)
-        if outputDeviceID != inputDeviceID {
-            CoreAudioDevices.setBufferFrameSize(bufferSize, device: outputDeviceID)
+        var routeInput = inputDeviceID
+        var routeOutput = outputDeviceID
+        if useAnalogAggregate,
+           let input = devices.first(where: { $0.id == inputDeviceID }),
+           let output = devices.first(where: { $0.id == outputDeviceID }),
+           input.id != output.id,
+           input.isAnalogInput,
+           output.isAnalogOutput,
+           let aggregate = CoreAudioDevices.createAnalogAggregate(inputUID: input.uid, outputUID: output.uid) {
+            analogAggregateID = aggregate
+            analogDuplexRoute = true
+            routeInput = aggregate
+            routeOutput = aggregate
+        }
+
+        // One AUHAL cannot hold an input-only device and a different
+        // output-only device. Analog mic + headphones become one private
+        // aggregate first, then both defaults point at that duplex device.
+        try check(
+            CoreAudioDevices.setDefaultInput(routeInput),
+            action: "select \(inputLabel) as input"
+        )
+        try check(
+            CoreAudioDevices.setDefaultOutput(routeOutput),
+            action: "select \(outputLabel) as output"
+        )
+
+        CoreAudioDevices.setBufferFrameSize(bufferSize, device: routeInput)
+        if routeOutput != routeInput {
+            CoreAudioDevices.setBufferFrameSize(bufferSize, device: routeOutput)
         }
     }
 
@@ -1027,6 +1089,16 @@ final class AmpSession: ObservableObject {
         }
     }
 
+    private var fifoPreRollFrames: Int {
+        Int(max(bufferSize * 2, 256))
+    }
+
+    private func updateEstimatedLatency() {
+        let preRoll = Double(fifoPreRollFrames)
+        latencyMs = 1000.0 * (Double(hardwareBuffer) * 2.0 + preRoll) / max(hardwareSampleRate, 1)
+        latencyIsEstimated = true
+    }
+
     private func check(_ status: OSStatus, action: String) throws {
         guard status == noErr else {
             throw NSError(
@@ -1043,7 +1115,7 @@ final class AmpSession: ObservableObject {
             return "The headphone jack didn’t initialize. Analog iRig is not listed as “iRig” — use External Microphone in, Headphones out. Leave sample rate on Follow device. Headphones stay in the iRig."
         }
         if ns.code == -3000 {
-            return "Couldn't open the audio engine. Power off and on again after the iRig is in the Mac headphone jack."
+            return "Couldn't open the audio engine. Unplug and replug the iRig, then power on. If this keeps happening, leave Input on External Microphone and Output on External Headphones."
         }
         if ns.domain == NSOSStatusErrorDomain || ns.domain.contains("avfaudio") || ns.domain.contains("coreaudio") {
             return ns.localizedDescription
@@ -1066,6 +1138,7 @@ final class AmpSession: ObservableObject {
         next.inputPeak = Double(meters.inputPeak)
         next.outputPeak = Double(meters.outputPeak)
         next.inputRmsDb = Double(meters.inputRmsDb)
+        next.inputPeakDb = Double(meters.inputPeakDb)
         next.noiseFloorDb = Double(meters.noiseFloorDb)
         next.inputClip = meters.inputClip
         next.outputClip = meters.outputClip
@@ -1076,36 +1149,43 @@ final class AmpSession: ObservableObject {
             next.recordPeak = Double(recorder.peak)
         }
 
+        if analogDuplexRoute {
+            next.clockCondition = "Analog duplex · one clock"
+        } else if inputDeviceID == outputDeviceID {
+            next.clockCondition = "Shared device"
+        } else {
+            next.clockCondition = "Separate devices"
+        }
         if let renderState {
             let fifo = renderState.fifoStats()
+            next.fifoAvailable = Int(fifo.availableFrames)
+            next.fifoUnderflowFrames = fifo.underflowFrames
+            next.fifoOverflowFrames = fifo.overflowFrames
             let underflowDelta = fifo.underflowFrames &- lastFIFOUnderflowFrames
             let overflowDelta = fifo.overflowFrames &- lastFIFOOverflowFrames
             if underflowDelta > UInt64(max(hardwareBuffer, 64)) {
                 next.audioDiagnostic = "Output is starving: raise the buffer to 256 or 512 samples. This causes clicks, not cable hiss."
             } else if overflowDelta > UInt64(max(hardwareBuffer, 64)) {
-                next.audioDiagnostic = "Input/output clocks are drifting: use one interface for both input and output, or Follow device."
+                next.audioDiagnostic = "Input and output clocks are drifting. Use the same interface for both."
             } else if meters.inputClip {
                 next.audioDiagnostic = "The analog input is clipping. Lower the bass/interface output or input level."
-            } else if next.noiseFloorDb > -45 {
-                next.audioDiagnostic = "High analog noise. Check the instrument cable, bass jack, iRig plug, shielding, and Mac charger."
+            } else if next.tunerConfidence > 0.2, next.tunerHz > 47, next.tunerHz < 53 {
+                next.audioDiagnostic = String(format: "Idle input is 50 Hz mains hum (tuner %.1f Hz), not a bass note. Unplug the charger to compare. Practice Clean notches 50/60 Hz so this does not hold the path open.", next.tunerHz)
+            } else if next.tunerConfidence > 0.2, next.tunerHz > 57, next.tunerHz < 63 {
+                next.audioDiagnostic = String(format: "Idle input is 60 Hz mains hum (tuner %.1f Hz), not a bass note. Unplug the charger to compare. Practice Clean notches 50/60 Hz so this does not hold the path open.", next.tunerHz)
+            } else if next.noiseFloorDb > -50 {
+                next.audioDiagnostic = "Hardware path likely noisy. Check bass, cable, iRig, grounding, charger, and input gain."
             } else if next.noiseFloorDb > -60 {
-                next.audioDiagnostic = "Moderate analog noise. Try another cable and unplug the Mac charger as a comparison."
+                next.audioDiagnostic = "Usable but noisy analog floor. Try another cable and unplug the Mac charger as a comparison."
+            } else if next.noiseFloorDb > -70 {
+                next.audioDiagnostic = "Good analog noise floor. Remaining hiss is more likely hardware than the Practice Clean path."
             } else if next.noiseFloorDb > -115 {
-                next.audioDiagnostic = "Input path looks quiet. Any remaining regular clicks are more likely buffer-related."
+                next.audioDiagnostic = "Excellent analog noise floor."
             } else {
                 next.audioDiagnostic = "Measuring idle input… stop playing for about one second."
             }
-            if fifo.underflowFrames != lastFIFOUnderflowFrames
-                || fifo.overflowFrames != lastFIFOOverflowFrames {
-                NSLog(
-                    "xzyqrn amp audio bridge: available=%d underflow=%llu overflow=%llu",
-                    fifo.availableFrames,
-                    fifo.underflowFrames,
-                    fifo.overflowFrames
-                )
-                lastFIFOUnderflowFrames = fifo.underflowFrames
-                lastFIFOOverflowFrames = fifo.overflowFrames
-            }
+            lastFIFOUnderflowFrames = fifo.underflowFrames
+            lastFIFOOverflowFrames = fifo.overflowFrames
         }
         liveMetrics = next
     }
@@ -1307,8 +1387,11 @@ final class AmpSession: ObservableObject {
         self.sinkNode = nil
         self.sourceNode = nil
         self.renderState = nil
-        lastFIFOUnderflowFrames = 0
-        lastFIFOOverflowFrames = 0
+        analogDuplexRoute = false
+        analogAggregateID = 0
+        CoreAudioDevices.destroyAnalogAggregate()
+        _ = CoreAudioDevices.setDefaultInput(inputDeviceID)
+        _ = CoreAudioDevices.setDefaultOutput(outputDeviceID)
         isRunning = false
         liveMetrics = LiveMetrics()
     }

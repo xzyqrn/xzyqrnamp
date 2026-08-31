@@ -31,7 +31,7 @@ struct TopBar: View {
                 .frame(maxWidth: 180, alignment: .leading)
 
             VStack(alignment: .trailing, spacing: 2) {
-                Text(String(format: "%.1f ms", session.latencyMs))
+                Text(String(format: "est. %.1f ms", session.latencyMs))
                     .font(AmpTheme.mono(12, weight: .semibold))
                     .foregroundStyle(AmpTheme.text)
                 Text(String(format: "%.0f Hz · %d", session.hardwareSampleRate, session.hardwareBuffer))

@@ -1,4 +1,5 @@
 import AVFoundation
+import Darwin
 import Foundation
 
 enum BeatStyle: Int, CaseIterable, Identifiable {
@@ -64,11 +65,34 @@ final class BeatPlayer: @unchecked Sendable {
     private let loops: [Loop?]
     private var playhead: Double = 0
     private var lastStyleIndex: Int = -1
+    private let playingPtr: UnsafeMutablePointer<Int32>
+    private let volumePtr: UnsafeMutablePointer<Int32>
+    private let stylePtr: UnsafeMutablePointer<Int32>
+    private let bpmPtr: UnsafeMutablePointer<Int32>
 
-    var playing = false
-    var volume: Float = 0.5
-    var style = BeatStyle.rock
-    var bpm: Double = 100
+    var playing: Bool {
+        get { OSAtomicAdd32Barrier(0, playingPtr) != 0 }
+        set {
+            storeAtomic(playingPtr, newValue ? 1 : 0)
+        }
+    }
+    var volume: Float {
+        get { Float(OSAtomicAdd32Barrier(0, volumePtr)) / 10_000.0 }
+        set {
+            storeAtomic(volumePtr, Int32((min(max(newValue, 0), 1) * 10_000).rounded()))
+        }
+    }
+    var style: BeatStyle {
+        get { BeatStyle(rawValue: Int(OSAtomicAdd32Barrier(0, stylePtr))) ?? .rock }
+        set { storeAtomic(stylePtr, Int32(newValue.rawValue)) }
+    }
+    var bpm: Double {
+        get { Double(OSAtomicAdd32Barrier(0, bpmPtr)) / 100.0 }
+        set {
+            let clamped = min(max(newValue, 40), 240)
+            storeAtomic(bpmPtr, Int32((clamped * 100.0).rounded()))
+        }
+    }
 
     init() {
         var loaded: [Loop?] = Array(repeating: nil, count: BeatStyle.allCases.count)
@@ -76,6 +100,25 @@ final class BeatPlayer: @unchecked Sendable {
             loaded[style.rawValue] = Self.load(named: "\(style.fileStem)-100")
         }
         loops = loaded
+        playingPtr = .allocate(capacity: 1)
+        volumePtr = .allocate(capacity: 1)
+        stylePtr = .allocate(capacity: 1)
+        bpmPtr = .allocate(capacity: 1)
+        playingPtr.initialize(to: 0)
+        volumePtr.initialize(to: 5_000)
+        stylePtr.initialize(to: Int32(BeatStyle.rock.rawValue))
+        bpmPtr.initialize(to: 10_000)
+    }
+
+    deinit {
+        playingPtr.deinitialize(count: 1)
+        volumePtr.deinitialize(count: 1)
+        stylePtr.deinitialize(count: 1)
+        bpmPtr.deinitialize(count: 1)
+        playingPtr.deallocate()
+        volumePtr.deallocate()
+        stylePtr.deallocate()
+        bpmPtr.deallocate()
     }
 
     var hasLoops: Bool {
@@ -88,8 +131,12 @@ final class BeatPlayer: @unchecked Sendable {
     }
 
     func mix(into output: UnsafeMutablePointer<Float>, frames: Int, engineRate: Double) {
-        guard playing, frames > 0, engineRate > 1 else { return }
-        let sIdx = style.rawValue
+        let isPlaying = playing
+        let vol = volume
+        let currentStyle = style
+        let currentBpm = bpm
+        guard isPlaying, frames > 0, engineRate > 1 else { return }
+        let sIdx = currentStyle.rawValue
         guard sIdx >= 0, sIdx < loops.count,
               let loop = loops[sIdx], loop.samples.count > 1, loop.sampleRate > 1 else { return }
 
@@ -99,8 +146,7 @@ final class BeatPlayer: @unchecked Sendable {
         }
 
         let n = loop.samples.count
-        let step = loop.sampleRate / engineRate * min(max(bpm, 40), 240) / 100.0
-        let vol = volume
+        let step = loop.sampleRate / engineRate * min(max(currentBpm, 40), 240) / 100.0
         var pos = playhead
         let span = Double(n)
 
@@ -118,6 +164,15 @@ final class BeatPlayer: @unchecked Sendable {
             }
         }
         playhead = pos
+    }
+
+    private func storeAtomic(_ pointer: UnsafeMutablePointer<Int32>, _ value: Int32) {
+        while true {
+            let current = pointer.pointee
+            if OSAtomicCompareAndSwap32Barrier(current, value, pointer) {
+                return
+            }
+        }
     }
 
     private static func load(named name: String) -> Loop? {

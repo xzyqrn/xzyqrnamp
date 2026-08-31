@@ -11,6 +11,7 @@ typedef struct AmpMeterState {
     float inputPeak;
     float outputPeak;
     float inputRmsDb;
+    float inputPeakDb;
     float noiseFloorDb;
     bool inputClip;
     bool outputClip;
@@ -58,7 +59,11 @@ void AmpProcessorSetMidFreqIndex(void *p, int index);
 void AmpProcessorSetUltraLoOn(void *p, bool on);
 void AmpProcessorSetUltraHiOn(void *p, bool on);
 void AmpProcessorSetGateOn(void *p, bool on);
+void AmpProcessorSetExpanderOn(void *p, bool on);
+void AmpProcessorSetNROn(void *p, bool on);
 void AmpProcessorSetNAMOn(void *p, bool on);
+void AmpProcessorSetCleanAmpOn(void *p, bool on);
+bool AmpProcessorCleanAmpOn(void *p);
 void AmpProcessorSetIROn(void *p, bool on);
 void AmpProcessorSetEQOn(void *p, bool on);
 void AmpProcessorSetBypass(void *p, bool on);
@@ -113,6 +118,10 @@ int AmpAudioFIFOWrite(void *fifo, const float *samples, int frames);
 int AmpAudioFIFORead(void *fifo, float *samples, int frames);
 int AmpAudioFIFOAvailable(void *fifo);
 AmpAudioFIFOStats AmpAudioFIFOGetStats(void *fifo);
+// Shared-clock duplex should read 1:1. Separate devices may steal or skip
+// one sample per block only after a persistent queue error; never jump by
+// several percent in a single callback.
+int AmpAudioFIFORequestFrames(int available, int outputFrames, int target, bool sharedClock);
 
 // Atomics shared by the main, audio-render, and recorder-writer threads.
 void *AmpRecorderStateCreate(void);

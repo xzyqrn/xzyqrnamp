@@ -18,6 +18,7 @@ struct SettingsSheet: View {
                     Text("Channel 1 (Left / Default)").tag(0)
                     Text("Channel 2 (Right / Inst 2)").tag(1)
                     Text("Sum 1+2 (Mono mix)").tag(2)
+                    Text("Auto (stronger channel)").tag(3)
                 }
                 .onChange(of: session.inputChannel) { _, ch in
                     session.setInputChannel(ch)
@@ -43,13 +44,13 @@ struct SettingsSheet: View {
                 Button("Apply to hardware") {
                     session.applyLiveSettings()
                 }
-                Text(String(format: "Measured path: %.0f Hz, %d samples, about %.1f ms.", session.hardwareSampleRate, session.hardwareBuffer, session.latencyMs))
+                Text(String(format: "Estimated path: %.0f Hz, %d samples, about %.1f ms.", session.hardwareSampleRate, session.hardwareBuffer, session.latencyMs))
                     .foregroundStyle(AmpTheme.muted)
                     .font(AmpTheme.caption(12))
             }
 
             Section("External instrument input") {
-                Text("A normal stereo splitter is output-only. Bass input requires a USB audio interface with an Instrument/Hi-Z socket, or a compatible CTIA TRRS guitar interface. A working analog input appears as External Microphone; its headphone side appears separately as External Headphones. Leave sample rate on Follow device.")
+                Text("A normal stereo splitter is output-only. Bass input requires a USB audio interface with an Instrument/Hi-Z socket, or a compatible CTIA TRRS guitar interface. A working analog input appears as External Microphone; its headphone side appears separately as External Headphones. Leave sample rate on Follow device. Analog defaults to Auto so an unused jack channel is not mixed in as hiss — Sum 1+2 is only for true stereo sources.")
                     .font(AmpTheme.caption(12))
                     .foregroundStyle(AmpTheme.muted)
                 if let hint = session.jackHint {
@@ -64,20 +65,35 @@ struct SettingsSheet: View {
                     Text(String(format: "%.1f dBFS RMS", session.inputRmsDb))
                         .font(AmpTheme.mono(12))
                 }
+                LabeledContent("Input peak") {
+                    Text(String(format: "%.1f dBFS", session.inputPeakDb))
+                        .font(AmpTheme.mono(12))
+                }
                 LabeledContent("Idle noise floor") {
                     Text(String(format: "%.1f dBFS", session.noiseFloorDb))
                         .font(AmpTheme.mono(12))
                 }
+                LabeledContent("Clipping") {
+                    Text(session.inputClip || session.outputClip ? "Yes" : "No")
+                        .font(AmpTheme.mono(12))
+                }
+                LabeledContent("Clock") {
+                    Text(session.clockCondition)
+                        .font(AmpTheme.mono(12))
+                }
                 Text(session.audioDiagnostic)
                     .font(AmpTheme.caption(12))
-                    .foregroundStyle(session.noiseFloorDb > -45 ? AmpTheme.warn : AmpTheme.muted)
-                Text("For a useful reading, leave the bass connected and stop playing for one second. Move one plug at a time: crackling that follows movement is a physical cable or jack fault.")
+                    .foregroundStyle(session.noiseFloorDb > -50 ? AmpTheme.warn : AmpTheme.muted)
+                Text("Calibrate by playing as hard as you normally do, then muting the strings for a couple of seconds. Target hard peaks around −12 to −6 dBFS and an idle floor below −60 dBFS. The app does not change analog hardware gain for you.")
+                    .font(AmpTheme.caption(11))
+                    .foregroundStyle(AmpTheme.faint)
+                Text("Noise floor: below −70 excellent · −70 to −60 good · −60 to −50 usable · above −50 likely a hardware-path issue.")
                     .font(AmpTheme.caption(11))
                     .foregroundStyle(AmpTheme.faint)
             }
 
             Section("Amp") {
-                Text("The default amp is xzyqrn Clean: your bass through a quiet preamp and the cabinet, with no NAM hiss. Load a .nam from tone3000.com only if you want a captured amp instead. Amp-only captures usually want the cabinet IR left on.")
+                Text("Practice Clean is a monitoring path, not BandLab’s guitar-amp + noise-suppression chain. If Clock says Analog duplex, analog in and headphones are locked together. If it says Separate devices, the engine still runs on this jack — that is normal for External Microphone + External Headphones.")
                     .font(AmpTheme.caption(12))
                     .foregroundStyle(AmpTheme.muted)
             }

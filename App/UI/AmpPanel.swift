@@ -34,6 +34,7 @@ struct AmpPanel: View {
                         LEDToggle(isOn: $session.ultraHiOn, title: "Ultra Hi") { session.pushAllParams() }
                         Text("•")
                             .foregroundStyle(AmpTheme.faint)
+                        LEDToggle(isOn: $session.nrOn, title: "NR", onChange: session.pushAllParams)
                         LEDToggle(isOn: $session.gateOn, title: "Gate", onChange: session.pushAllParams)
                         LEDToggle(isOn: $session.eqOn, title: "EQ", onChange: session.pushAllParams)
                         LEDToggle(isOn: $session.namOn, title: "Amp", onChange: session.pushAllParams)
@@ -90,7 +91,7 @@ struct AmpPanel: View {
                         value: session.namName,
                         on: session.namOn,
                         load: onLoadNAM,
-                        clear: session.namPath == nil ? nil : { session.useCleanAmp() }
+                        clear: session.namPath == nil ? nil : { session.clearNAMToPassthrough() }
                     ) {
                         session.namOn.toggle()
                         session.pushAllParams()
@@ -183,7 +184,7 @@ struct AmpPanel: View {
                     .lineLimit(1)
                 Spacer(minLength: 0)
                 if let clear {
-                    Button("Clean", action: clear)
+                    Button("Clear", action: clear)
                         .buttonStyle(StudioButton())
                 }
                 Button("Load", action: load)

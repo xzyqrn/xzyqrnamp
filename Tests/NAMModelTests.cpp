@@ -165,6 +165,290 @@ bool testRecorderState() {
     return true;
 }
 
+bool testFIFORequestFrames() {
+    const bool ok =
+        AmpAudioFIFORequestFrames(256, 128, 256, true) == 128
+        && AmpAudioFIFORequestFrames(260, 128, 256, true) == 128
+        && AmpAudioFIFORequestFrames(260, 128, 256, false) == 128
+        && AmpAudioFIFORequestFrames(400, 128, 256, false) == 129
+        && AmpAudioFIFORequestFrames(200, 128, 256, false) == 127
+        && AmpAudioFIFORequestFrames(80, 128, 256, false) == 128;
+    if (!ok) {
+        std::fprintf(stderr, "FAIL: FIFO request-frame PLL regression\n");
+        return false;
+    }
+    std::puts("FIFO request-frame test passed");
+    return true;
+}
+
+void disableAllProcessing(void *processor) {
+    AmpProcessorSetGateOn(processor, false);
+    AmpProcessorSetExpanderOn(processor, false);
+    AmpProcessorSetNAMOn(processor, false);
+    AmpProcessorSetCleanAmpOn(processor, false);
+    AmpProcessorSetIROn(processor, false);
+    AmpProcessorSetEQOn(processor, false);
+    AmpProcessorSetCompOn(processor, false);
+    AmpProcessorSetDriveOn(processor, false);
+    AmpProcessorSetOctaverOn(processor, false);
+    AmpProcessorSetEnvelopeOn(processor, false);
+    AmpProcessorSetChorusOn(processor, false);
+    AmpProcessorSetDelayOn(processor, false);
+    AmpProcessorSetReverbOn(processor, false);
+    AmpProcessorSetUtilityFilterOn(processor, false);
+    AmpProcessorSetBypass(processor, false);
+    AmpProcessorSetInputGainDb(processor, 0.0f);
+    AmpProcessorSetOutputGainDb(processor, 0.0f);
+    AmpProcessorUnloadNAM(processor);
+    AmpProcessorUnloadIR(processor);
+}
+
+bool testEmptyNAMIsPassthrough(void *processor) {
+    auto run = [&](bool namOn) {
+        AmpProcessorReset(processor, 48000.0, 512);
+        disableAllProcessing(processor);
+        AmpProcessorSetNAMOn(processor, namOn);
+        AmpProcessorSetCleanAmpOn(processor, false);
+        AmpProcessorUnloadNAM(processor);
+        constexpr int block = 128;
+        std::vector<float> input(block), output(block * 160);
+        for (int b = 0; b < 160; ++b) {
+            for (int i = 0; i < block; ++i) {
+                const int frame = b * block + i;
+                input[i] = 0.12f * std::sin(2.0 * M_PI * 110.0 * frame / 48000.0);
+            }
+            AmpProcessorProcess(processor, input.data(), output.data() + b * block, block);
+        }
+        return output;
+    };
+    const auto dry = run(false);
+    const auto wet = run(true);
+    double dryEnergy = 0;
+    double difference = 0;
+    for (size_t i = 40 * 128; i < dry.size(); ++i) {
+        dryEnergy += static_cast<double>(dry[i]) * dry[i];
+        const double d = static_cast<double>(wet[i]) - dry[i];
+        difference += d * d;
+    }
+    if (dryEnergy < 1.0e-4 || difference / dryEnergy > 0.02) {
+        std::fprintf(stderr, "FAIL: empty NAM must pass through instead of running CleanAmp\n");
+        return false;
+    }
+    std::puts("Empty NAM passthrough test passed");
+    return true;
+}
+
+bool testCleanAmpIsOptIn(void *processor) {
+    auto run = [&](bool cleanOn) {
+        AmpProcessorReset(processor, 48000.0, 512);
+        disableAllProcessing(processor);
+        AmpProcessorSetNAMOn(processor, true);
+        AmpProcessorSetCleanAmpOn(processor, cleanOn);
+        AmpProcessorUnloadNAM(processor);
+        constexpr int block = 128;
+        std::vector<float> input(block), output(block * 160);
+        for (int b = 0; b < 160; ++b) {
+            for (int i = 0; i < block; ++i) {
+                const int frame = b * block + i;
+                input[i] = 0.16f * std::sin(2.0 * M_PI * 110.0 * frame / 48000.0);
+            }
+            AmpProcessorProcess(processor, input.data(), output.data() + b * block, block);
+        }
+        return output;
+    };
+    const auto off = run(false);
+    const auto on = run(true);
+    double offEnergy = 0;
+    double difference = 0;
+    for (size_t i = 40 * 128; i < off.size(); ++i) {
+        offEnergy += static_cast<double>(off[i]) * off[i];
+        const double d = static_cast<double>(on[i]) - off[i];
+        difference += d * d;
+    }
+    if (offEnergy < 1.0e-4 || difference / offEnergy < 0.001) {
+        std::fprintf(stderr, "FAIL: Vintage Clean must color the signal only when enabled\n");
+        return false;
+    }
+    std::puts("Opt-in CleanAmp test passed");
+    return true;
+}
+
+bool testPracticeCleanTransparency(void *processor) {
+    AmpProcessorReset(processor, 48000.0, 512);
+    disableAllProcessing(processor);
+    AmpProcessorSetUtilityFilterOn(processor, true);
+    AmpProcessorSetHighPassHz(processor, 25.0f);
+    AmpProcessorSetLowPassHz(processor, 16000.0f);
+    AmpProcessorSetOutputGainDb(processor, -3.0f);
+    AmpProcessorSetExpanderOn(processor, true);
+
+    constexpr int block = 128;
+    std::vector<float> input(block), output(block);
+    std::vector<float> zeros(block, 0.0f);
+    double silence = 0;
+    double toneEnergy = 0;
+    double harmonic = 0;
+    double fundamental = 0;
+    for (int b = 0; b < 400; ++b) {
+        AmpProcessorProcess(processor, zeros.data(), output.data(), block);
+        if (b > 20) {
+            for (float sample : output)
+                silence += static_cast<double>(sample) * sample;
+        }
+    }
+    for (int b = 0; b < 400; ++b) {
+        for (int i = 0; i < block; ++i) {
+            const int frame = b * block + i;
+            input[i] = 0.20f * std::sin(2.0 * M_PI * 110.0 * frame / 48000.0);
+        }
+        AmpProcessorProcess(processor, input.data(), output.data(), block);
+        if (b > 80) {
+            for (int i = 0; i < block; ++i) {
+                const int frame = b * block + i;
+                const double t = frame / 48000.0;
+                const double y = output[i];
+                toneEnergy += y * y;
+                fundamental += y * std::sin(2.0 * M_PI * 110.0 * t);
+                harmonic += y * std::sin(2.0 * M_PI * 220.0 * t);
+            }
+        }
+    }
+    const double thdRatio = std::fabs(harmonic) / std::max(std::fabs(fundamental), 1.0e-12);
+    if (silence > 1.0e-8 || toneEnergy < 1.0e-3 || thdRatio > 0.05) {
+        std::fprintf(stderr, "FAIL: Practice Clean is not transparent (silence=%.3g thd=%.3g)\n",
+            silence, thdRatio);
+        return false;
+    }
+    std::puts("Practice Clean transparency test passed");
+    return true;
+}
+
+bool testMainsHumIsNotched(void *processor) {
+    AmpProcessorReset(processor, 48000.0, 512);
+    disableAllProcessing(processor);
+    AmpProcessorSetExpanderOn(processor, false);
+    AmpProcessorSetOutputGainDb(processor, 0.0f);
+
+    constexpr int block = 128;
+    std::vector<float> input(block), output(block);
+    auto energyAt = [&](double hz) {
+        double energy = 0;
+        for (int b = 0; b < 400; ++b) {
+            for (int i = 0; i < block; ++i) {
+                const int frame = b * block + i;
+                input[i] = 0.20f * std::sin(2.0 * M_PI * hz * frame / 48000.0);
+            }
+            AmpProcessorProcess(processor, input.data(), output.data(), block);
+            if (b > 80) {
+                for (float sample : output)
+                    energy += static_cast<double>(sample) * sample;
+            }
+        }
+        return energy;
+    };
+    const double hum = energyAt(50.0);
+    const double note = energyAt(110.0);
+    if (note < 1.0e-3 || hum > note * 0.08) {
+        std::fprintf(stderr, "FAIL: 50 Hz mains hum was not notched (hum=%.3g note=%.3g)\n", hum, note);
+        return false;
+    }
+    std::puts("Mains-hum notch test passed");
+    return true;
+}
+
+bool testSilenceStability(void *processor) {
+    AmpProcessorReset(processor, 48000.0, 512);
+    disableAllProcessing(processor);
+    AmpProcessorSetNAMOn(processor, true);
+    AmpProcessorSetCleanAmpOn(processor, false);
+    std::vector<float> zeros(128, 0.0f);
+    std::vector<float> output(128, 0.0f);
+    double energy = 0;
+    bool finite = true;
+    for (int b = 0; b < 48 * 30; ++b) {
+        AmpProcessorProcess(processor, zeros.data(), output.data(), 128);
+        for (float sample : output) {
+            finite = finite && std::isfinite(sample);
+            energy += static_cast<double>(sample) * sample;
+        }
+    }
+    if (!finite || energy > 1.0e-6) {
+        std::fprintf(stderr, "FAIL: silence stability produced energy or non-finite samples\n");
+        return false;
+    }
+    std::puts("Silence stability test passed");
+    return true;
+}
+
+bool testRandomBlockContinuity(void *processor) {
+    AmpProcessorReset(processor, 48000.0, 4096);
+    disableAllProcessing(processor);
+    AmpProcessorSetUtilityFilterOn(processor, true);
+    AmpProcessorSetHighPassHz(processor, 25.0f);
+    AmpProcessorSetLowPassHz(processor, 16000.0f);
+
+    constexpr int total = 48000;
+    std::vector<float> input(total);
+    for (int i = 0; i < total; ++i)
+        input[i] = 0.14f * std::sin(2.0 * M_PI * 110.0 * i / 48000.0);
+
+    auto processWith = [&](const std::vector<int> &sizes) {
+        AmpProcessorReset(processor, 48000.0, 4096);
+        disableAllProcessing(processor);
+        AmpProcessorSetUtilityFilterOn(processor, true);
+        AmpProcessorSetHighPassHz(processor, 25.0f);
+        AmpProcessorSetLowPassHz(processor, 16000.0f);
+        std::vector<float> output(total);
+        int offset = 0;
+        int sizeIndex = 0;
+        while (offset < total) {
+            const int block = std::min(sizes[sizeIndex % sizes.size()], total - offset);
+            AmpProcessorProcess(processor, input.data() + offset, output.data() + offset, block);
+            offset += block;
+            ++sizeIndex;
+        }
+        return output;
+    };
+
+    const auto a = processWith({64});
+    const auto b = processWith({128});
+    const auto c = processWith({256, 64, 128, 96, 192});
+    double diffAB = 0;
+    double diffAC = 0;
+    for (int i = 2048; i < total; ++i) {
+        const double d1 = static_cast<double>(a[i]) - b[i];
+        const double d2 = static_cast<double>(a[i]) - c[i];
+        diffAB += d1 * d1;
+        diffAC += d2 * d2;
+    }
+    if (diffAB > 1.0e-4 || diffAC > 1.0e-4) {
+        std::fprintf(stderr, "FAIL: block-size continuity drifted (ab=%.3g ac=%.3g)\n", diffAB, diffAC);
+        return false;
+    }
+    std::puts("Block-size continuity test passed");
+    return true;
+}
+
+bool testOversizedBlockIsSafe(void *processor) {
+    AmpProcessorReset(processor, 48000.0, 512);
+    disableAllProcessing(processor);
+    std::vector<float> input(8192, 0.25f);
+    std::vector<float> output(8192, 99.0f);
+    AmpProcessorProcess(processor, input.data(), output.data(), 8192);
+    bool copied = true;
+    bool finite = true;
+    for (int i = 0; i < 8192; ++i) {
+        finite = finite && std::isfinite(output[i]);
+        copied = copied && std::fabs(output[i] - 0.25f) < 1.0e-6f;
+    }
+    if (!finite || !copied) {
+        std::fprintf(stderr, "FAIL: oversized render block must fail safe without resizing\n");
+        return false;
+    }
+    std::puts("Oversized block fail-safe test passed");
+    return true;
+}
+
 bool testPreset(void *processor, const json &preset, const std::filesystem::path &resourceRoot) {
     AmpProcessorReset(processor, 48000.0, 1024);
     AmpProcessorSetInputGainDb(processor, value<float>(preset, "inputGainDb", 0.0f));
@@ -177,7 +461,12 @@ bool testPreset(void *processor, const json &preset, const std::filesystem::path
     AmpProcessorSetUltraLoOn(processor, value<bool>(preset, "ultraLoOn", false));
     AmpProcessorSetUltraHiOn(processor, value<bool>(preset, "ultraHiOn", false));
     AmpProcessorSetGateOn(processor, value<bool>(preset, "gateOn", false));
+    AmpProcessorSetExpanderOn(processor, value<bool>(preset, "expanderOn", false));
     AmpProcessorSetNAMOn(processor, value<bool>(preset, "namOn", true));
+    const std::string namFileEarly = value<std::string>(preset, "namFile", "");
+    const bool cleanAmpOn = value<bool>(
+        preset, "cleanAmpOn", value<bool>(preset, "namOn", true) && namFileEarly.empty());
+    AmpProcessorSetCleanAmpOn(processor, cleanAmpOn);
     AmpProcessorSetIROn(processor, value<bool>(preset, "irOn", true));
     AmpProcessorSetEQOn(processor, value<bool>(preset, "eqOn", true));
     AmpProcessorSetBypass(processor, false);
@@ -209,8 +498,10 @@ bool testPreset(void *processor, const json &preset, const std::filesystem::path
     AmpProcessorSetReverbDamp(processor, value<float>(preset, "reverbDamp", 0.45f));
     AmpProcessorSetReverbMix(processor, value<float>(preset, "reverbMix", 0.2f));
     AmpProcessorSetUtilityFilterOn(processor, value<bool>(preset, "utilityFilterOn", true));
-    AmpProcessorSetHighPassHz(processor, value<float>(preset, "utilityHighPassHz", 32.0f));
-    AmpProcessorSetLowPassHz(processor, value<float>(preset, "utilityLowPassHz", 12000.0f));
+    const float highPass = value<float>(preset, "highPassHz", value<float>(preset, "utilityHighPassHz", 32.0f));
+    const float lowPass = value<float>(preset, "lowPassHz", value<float>(preset, "utilityLowPassHz", 12000.0f));
+    AmpProcessorSetHighPassHz(processor, highPass);
+    AmpProcessorSetLowPassHz(processor, lowPass);
 
     const std::string namFile = value<std::string>(preset, "namFile", "");
     if (!namFile.empty()) {
@@ -280,6 +571,7 @@ int main(int argc, char **argv) {
     void *processor = AmpProcessorShared();
     AmpProcessorReset(processor, 48000.0, 512);
     AmpProcessorSetGateOn(processor, false);
+    AmpProcessorSetExpanderOn(processor, false);
     AmpProcessorSetIROn(processor, false);
     AmpProcessorSetEQOn(processor, false);
     AmpProcessorSetCompOn(processor, false);
@@ -295,7 +587,15 @@ int main(int argc, char **argv) {
     AmpProcessorSetOutputGainDb(processor, 0.0f);
 
     bool passed = testFIFO();
+    passed = testFIFORequestFrames() && passed;
     passed = testRecorderState() && passed;
+    passed = testEmptyNAMIsPassthrough(processor) && passed;
+    passed = testCleanAmpIsOptIn(processor) && passed;
+    passed = testPracticeCleanTransparency(processor) && passed;
+    passed = testMainsHumIsNotched(processor) && passed;
+    passed = testSilenceStability(processor) && passed;
+    passed = testRandomBlockContinuity(processor) && passed;
+    passed = testOversizedBlockIsSafe(processor) && passed;
     for (int i = 3; i < argc; ++i)
         passed = testModel(processor, argv[i]) && passed;
 

@@ -34,6 +34,9 @@ xcrun clang++ -std=c++20 -O2 \
 
 jq -e '
     length >= 16
+    and any(.id == "raw-di")
+    and any(.id == "vintage-clean")
+    and (map(select(.id == "practice")) | .[0] | .namOn == false and .irOn == false and .gateOn == false and .expanderOn == true and .eqOn == false and (.cleanAmpOn != true))
     and (map(.id) | unique | length == length)
     and all(.[];
         (.inputGainDb >= -12 and .inputGainDb <= 24)
@@ -45,8 +48,8 @@ jq -e '
         and (.midFreqIndex >= 0 and .midFreqIndex <= 4)
         and ((.octaverMix // 0.35) >= 0 and (.octaverMix // 0.35) <= 1)
         and ((.envelopeSensitivity // 0.55) >= 0 and (.envelopeSensitivity // 0.55) <= 1)
-        and ((.utilityHighPassHz // 32) >= 20 and (.utilityHighPassHz // 32) <= 180)
-        and ((.utilityLowPassHz // 12000) >= 1200 and (.utilityLowPassHz // 12000) <= 16000)
+        and ((.highPassHz // 32) >= 20 and (.highPassHz // 32) <= 180)
+        and ((.lowPassHz // 12000) >= 1200 and (.lowPassHz // 12000) <= 16000)
     )
 ' App/Resources/Presets/factory-presets.json >/dev/null
 

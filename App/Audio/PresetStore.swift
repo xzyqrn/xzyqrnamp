@@ -38,7 +38,10 @@ struct AmpPreset: Identifiable, Codable, Hashable {
     var midDb: Double
     var trebleDb: Double
     var gateOn: Bool
+    var expanderOn: Bool
+    var nrOn: Bool
     var namOn: Bool
+    var cleanAmpOn: Bool
     var irOn: Bool
     var eqOn: Bool
     var namFile: String
@@ -98,7 +101,10 @@ struct AmpPreset: Identifiable, Codable, Hashable {
         midDb: Double,
         trebleDb: Double,
         gateOn: Bool,
+        expanderOn: Bool = false,
+        nrOn: Bool = false,
         namOn: Bool,
+        cleanAmpOn: Bool = false,
         irOn: Bool,
         eqOn: Bool,
         namFile: String,
@@ -148,7 +154,10 @@ struct AmpPreset: Identifiable, Codable, Hashable {
         self.midDb = midDb
         self.trebleDb = trebleDb
         self.gateOn = gateOn
+        self.expanderOn = expanderOn
+        self.nrOn = nrOn
         self.namOn = namOn
+        self.cleanAmpOn = cleanAmpOn
         self.irOn = irOn
         self.eqOn = eqOn
         self.namFile = namFile
@@ -202,12 +211,18 @@ struct AmpPreset: Identifiable, Codable, Hashable {
         trebleDb = try c.decode(Double.self, forKey: .trebleDb)
         gateOn = try c.decode(Bool.self, forKey: .gateOn)
         namOn = try c.decode(Bool.self, forKey: .namOn)
+        expanderOn = try c.decodeIfPresent(Bool.self, forKey: .expanderOn)
+            ?? (id == "practice" && !gateOn)
+        nrOn = try c.decodeIfPresent(Bool.self, forKey: .nrOn)
+            ?? (id == "practice" && !gateOn)
         irOn = try c.decode(Bool.self, forKey: .irOn)
         eqOn = try c.decode(Bool.self, forKey: .eqOn)
         namFile = try c.decode(String.self, forKey: .namFile)
         irFile = try c.decode(String.self, forKey: .irFile)
         namBookmark = try c.decodeIfPresent(Data.self, forKey: .namBookmark)
         irBookmark = try c.decodeIfPresent(Data.self, forKey: .irBookmark)
+        cleanAmpOn = try c.decodeIfPresent(Bool.self, forKey: .cleanAmpOn)
+            ?? (namOn && namFile.isEmpty && namBookmark == nil)
         compOn = try c.decodeIfPresent(Bool.self, forKey: .compOn) ?? false
         compThresholdDb = try c.decodeIfPresent(Double.self, forKey: .compThresholdDb) ?? -24
         compRatio = try c.decodeIfPresent(Double.self, forKey: .compRatio) ?? 4
@@ -258,9 +273,30 @@ struct AmpPreset: Identifiable, Codable, Hashable {
         AmpPreset(
             id: "practice",
             name: "Practice Clean",
+            inputGainDb: 0, outputGainDb: -3, gateThresholdDb: -40,
+            bassDb: 0, midDb: 0, trebleDb: 0,
+            gateOn: false, expanderOn: true, nrOn: true, namOn: false, cleanAmpOn: false, irOn: false, eqOn: false,
+            namFile: "", irFile: "",
+            compOn: false, compThresholdDb: -22, compRatio: 3.5, compMakeupDb: 0,
+            utilityFilterOn: true, highPassHz: 25, lowPassHz: 16000,
+            midFreqIndex: 1, ultraLoOn: false, ultraHiOn: false
+        ),
+        AmpPreset(
+            id: "raw-di",
+            name: "Raw DI",
+            inputGainDb: 0, outputGainDb: 0, gateThresholdDb: -40,
+            bassDb: 0, midDb: 0, trebleDb: 0,
+            gateOn: false, expanderOn: false, namOn: false, cleanAmpOn: false, irOn: false, eqOn: false,
+            namFile: "", irFile: "",
+            utilityFilterOn: true, highPassHz: 22, lowPassHz: 16000,
+            midFreqIndex: 1, ultraLoOn: false, ultraHiOn: false
+        ),
+        AmpPreset(
+            id: "vintage-clean",
+            name: "xzyqrn Vintage Clean",
             inputGainDb: 0, outputGainDb: 0, gateThresholdDb: -40,
             bassDb: 1.5, midDb: 0, trebleDb: -3,
-            gateOn: true, namOn: true, irOn: true, eqOn: true,
+            gateOn: true, namOn: true, cleanAmpOn: true, irOn: true, eqOn: true,
             namFile: "", irFile: "bass-4x10.wav",
             compOn: false, compThresholdDb: -22, compRatio: 3.5, compMakeupDb: 0,
             utilityFilterOn: true, highPassHz: 35, lowPassHz: 5000,
@@ -293,7 +329,7 @@ struct AmpPreset: Identifiable, Codable, Hashable {
             name: "Modern Slap & Pop",
             inputGainDb: 3.5, outputGainDb: -1, gateThresholdDb: -38,
             bassDb: 3.5, midDb: -2.5, trebleDb: 3.0,
-            gateOn: true, namOn: true, irOn: true, eqOn: true,
+            gateOn: true, namOn: true, cleanAmpOn: true, irOn: true, eqOn: true,
             namFile: "", irFile: "bass-4x10.wav",
             compOn: true, compThresholdDb: -16, compRatio: 6.0, compMakeupDb: 4.0,
             chorusOn: true, chorusRate: 1.2, chorusDepth: 0.25, chorusMix: 0.20,
@@ -304,7 +340,7 @@ struct AmpPreset: Identifiable, Codable, Hashable {
             name: "80s Fretless",
             inputGainDb: 3.0, outputGainDb: -1.5, gateThresholdDb: -42,
             bassDb: 1.0, midDb: 2.5, trebleDb: 0.5,
-            gateOn: true, namOn: true, irOn: true, eqOn: true,
+            gateOn: true, namOn: true, cleanAmpOn: true, irOn: true, eqOn: true,
             namFile: "", irFile: "bass-4x10.wav",
             compOn: true, compThresholdDb: -22, compRatio: 3.0, compMakeupDb: 2.0,
             chorusOn: true, chorusRate: 0.65, chorusDepth: 0.65, chorusMix: 0.45,
@@ -316,7 +352,7 @@ struct AmpPreset: Identifiable, Codable, Hashable {
             name: "Motown Thump",
             inputGainDb: 4.5, outputGainDb: -1.0, gateThresholdDb: -44,
             bassDb: 4.0, midDb: 1.0, trebleDb: -4.5,
-            gateOn: true, namOn: true, irOn: true, eqOn: true,
+            gateOn: true, namOn: true, cleanAmpOn: true, irOn: true, eqOn: true,
             namFile: "", irFile: "bass-1x15.wav",
             compOn: true, compThresholdDb: -24, compRatio: 4.5, compMakeupDb: 3.0,
             driveOn: true, driveAmount: 0.18, driveTone: 0.25, driveMix: 0.35,

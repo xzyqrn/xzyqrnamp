@@ -121,6 +121,8 @@ enum CoreAudioDevices {
         return devices.first(where: \.hasOutput)?.id ?? system
     }
 
+    static let analogAggregateUID = "com.herojay.Amplifier.analog-duplex"
+
     @discardableResult
     static func setDefaultInput(_ id: AudioDeviceID) -> OSStatus {
         setDefaultDevice(id, selector: kAudioHardwarePropertyDefaultInputDevice)
@@ -290,6 +292,62 @@ enum CoreAudioDevices {
         }
     }
 
+    static func destroyAnalogAggregate() {
+        for id in allDeviceIDs() {
+            if stringProperty(id, kAudioDevicePropertyDeviceUID) == analogAggregateUID {
+                AudioHardwareDestroyAggregateDevice(id)
+            }
+        }
+    }
+
+    /// Combine analog mic + headphones into one private device so Core Audio
+    /// owns drift correction instead of a homemade FIFO.
+    static func createAnalogAggregate(inputUID: String, outputUID: String) -> AudioDeviceID? {
+        destroyAnalogAggregate()
+        guard inputUID != outputUID else { return nil }
+
+        let outputSub: [String: Any] = [
+            kAudioSubDeviceUIDKey as String: outputUID
+        ]
+        let inputSub: [String: Any] = [
+            kAudioSubDeviceUIDKey as String: inputUID,
+            kAudioSubDeviceDriftCompensationKey as String: 1,
+            kAudioSubDeviceDriftCompensationQualityKey as String: kAudioSubDeviceDriftCompensationMaxQuality
+        ]
+        let description: [String: Any] = [
+            kAudioAggregateDeviceNameKey as String: "xzyqrn analog duplex",
+            kAudioAggregateDeviceUIDKey as String: analogAggregateUID,
+            kAudioAggregateDeviceIsPrivateKey as String: 1,
+            kAudioAggregateDeviceIsStackedKey as String: 0,
+            kAudioAggregateDeviceMainSubDeviceKey as String: outputUID,
+            kAudioAggregateDeviceClockDeviceKey as String: outputUID,
+            kAudioAggregateDeviceSubDeviceListKey as String: [outputSub, inputSub]
+        ]
+
+        var aggregateID = AudioDeviceID(0)
+        let status = AudioHardwareCreateAggregateDevice(description as CFDictionary, &aggregateID)
+        guard status == noErr, aggregateID != 0 else { return nil }
+        return aggregateID
+    }
+
+    private static func allDeviceIDs() -> [AudioDeviceID] {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDevices,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var dataSize: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &dataSize) == noErr else {
+            return []
+        }
+        let count = Int(dataSize) / MemoryLayout<AudioDeviceID>.size
+        var ids = Array(repeating: AudioDeviceID(0), count: count)
+        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &dataSize, &ids) == noErr else {
+            return []
+        }
+        return ids
+    }
+
     private static func setDefaultDevice(_ id: AudioDeviceID, selector: AudioObjectPropertySelector) -> OSStatus {
         guard id != 0 else { return kAudioHardwareBadDeviceError }
         var device = id
@@ -318,6 +376,7 @@ enum CoreAudioDevices {
         guard isAlive(id) else { return nil }
         let name = stringProperty(id, kAudioObjectPropertyName) ?? "Device \(id)"
         let uid = stringProperty(id, kAudioDevicePropertyDeviceUID) ?? "\(id)"
+        if uid == analogAggregateUID { return nil }
         let ins = channelCount(id, kAudioDevicePropertyScopeInput)
         let outs = channelCount(id, kAudioDevicePropertyScopeOutput)
         if ins == 0 && outs == 0 { return nil }
