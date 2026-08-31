@@ -122,6 +122,11 @@ enum CoreAudioDevices {
     }
 
     static let analogAggregateUID = "com.herojay.Amplifier.analog-duplex"
+    static let outputTapAggregateUID = "com.herojay.Amplifier.output-tap"
+
+    static func uid(of id: AudioDeviceID) -> String? {
+        stringProperty(id, kAudioDevicePropertyDeviceUID)
+    }
 
     @discardableResult
     static func setDefaultInput(_ id: AudioDeviceID) -> OSStatus {
@@ -293,8 +298,16 @@ enum CoreAudioDevices {
     }
 
     static func destroyAnalogAggregate() {
+        destroyAggregate(uid: analogAggregateUID)
+    }
+
+    static func destroyOutputTapAggregate() {
+        destroyAggregate(uid: outputTapAggregateUID)
+    }
+
+    private static func destroyAggregate(uid: String) {
         for id in allDeviceIDs() {
-            if stringProperty(id, kAudioDevicePropertyDeviceUID) == analogAggregateUID {
+            if stringProperty(id, kAudioDevicePropertyDeviceUID) == uid {
                 AudioHardwareDestroyAggregateDevice(id)
             }
         }
@@ -376,7 +389,7 @@ enum CoreAudioDevices {
         guard isAlive(id) else { return nil }
         let name = stringProperty(id, kAudioObjectPropertyName) ?? "Device \(id)"
         let uid = stringProperty(id, kAudioDevicePropertyDeviceUID) ?? "\(id)"
-        if uid == analogAggregateUID { return nil }
+        if uid == analogAggregateUID || uid == outputTapAggregateUID { return nil }
         let ins = channelCount(id, kAudioDevicePropertyScopeInput)
         let outs = channelCount(id, kAudioDevicePropertyScopeOutput)
         if ins == 0 && outs == 0 { return nil }

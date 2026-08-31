@@ -119,8 +119,14 @@ struct PracticeLabView: View {
     private var tunerCard: some View {
         StudioCard {
             VStack(alignment: .leading, spacing: 10) {
-                SectionLabel(text: "Tuner")
-                TunerBadge(hz: amp.tunerHz, confidence: amp.tunerConfidence)
+                HStack {
+                    SectionLabel(text: "Tuner")
+                    Spacer(minLength: 0)
+                    LEDToggle(isOn: $amp.tunerMute, title: "Mute", destructive: true) {
+                        amp.pushAllParams()
+                    }
+                }
+                TunerDisplay(hz: amp.tunerHz, confidence: amp.tunerConfidence, isRunning: amp.isRunning)
                 Text(amp.isRunning ? "Listening to your live bass input" : "Power on the rig to tune")
                     .font(AmpTheme.caption(10))
                     .foregroundStyle(AmpTheme.faint)
@@ -187,8 +193,14 @@ struct PracticeLabView: View {
                     .buttonStyle(StudioButton(prominent: amp.isRecording))
                     .disabled(!amp.isRunning && !amp.isRecording)
                 LEDToggle(isOn: $amp.recordBassOnly, title: "Bass only") {
-                    amp.recorder.recordBassOnly = amp.recordBassOnly
+                    amp.applyRecordSource()
                 }
+                .help("Off records everything playing to the selected output, including other apps. On records processed bass only.")
+                Text(amp.recordBassOnly
+                     ? "Records processed bass only — no click, no other apps."
+                     : "Records everything playing to the selected output, including other apps.")
+                    .font(AmpTheme.caption(9))
+                    .foregroundStyle(AmpTheme.faint)
                 Text("\(amp.takes.count) saved takes")
                     .font(AmpTheme.caption(10))
                     .foregroundStyle(AmpTheme.muted)

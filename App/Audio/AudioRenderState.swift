@@ -227,7 +227,7 @@ final class AudioRenderState: @unchecked Sendable {
             }
         }
 
-        if recorder.armed && !recorder.recordBassOnly {
+        if recorder.armed && !recorder.recordBassOnly && !recorder.capturingSystemOutput {
             recorder.push(work, frames: frames)
         }
 

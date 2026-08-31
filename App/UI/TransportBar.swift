@@ -5,16 +5,18 @@ struct TransportBar: View {
     @State private var showTakes = false
 
     var body: some View {
-        HStack(spacing: 18) {
+        HStack(alignment: .center, spacing: 16) {
             beatSection
-            Rectangle()
-                .fill(AmpTheme.line)
-                .frame(width: 1, height: 42)
-            recordSection
             Spacer(minLength: 8)
+            sectionDivider
+            recordSection
+            sectionDivider
+            Spacer(minLength: 8)
+            extrasSection
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .padding(.vertical, 12)
+        .frame(minHeight: 76)
         .background(AmpTheme.surface)
         .overlay(alignment: .top) {
             Rectangle().fill(AmpTheme.line).frame(height: 1)
@@ -83,8 +85,8 @@ struct TransportBar: View {
             AmpKnob(
                 value: $session.beatVolume,
                 range: 0...1,
-                label: "Beat",
-                size: 40,
+                label: "Vol",
+                size: 36,
                 format: { String(format: "%.0f%%", $0 * 100) },
                 onChange: { session.setBeatVolume(session.beatVolume) }
             )
@@ -124,10 +126,15 @@ struct TransportBar: View {
                 VUMeter(level: session.isRecording ? session.recordPeak : 0, clip: session.recordPeak > 0.95, label: "REC")
                     .frame(width: 140)
             }
+        }
+    }
 
+    private var extrasSection: some View {
+        HStack(spacing: 12) {
             LEDToggle(isOn: $session.recordBassOnly, title: "Bass only") {
-                session.recorder.recordBassOnly = session.recordBassOnly
+                session.applyRecordSource()
             }
+            .help("Off records everything playing to the selected output, including other apps. On records processed bass only.")
 
             Button {
                 session.takes = RecordingStore.loadAll()
@@ -158,17 +165,10 @@ struct TransportBar: View {
         return String(format: "%02d:%02d.%02d", m, s, cs)
     }
 
-    private func chip(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(AmpTheme.label(10))
-                .foregroundStyle(selected ? AmpTheme.bg : AmpTheme.text)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 5)
-                .background(selected ? AmpTheme.accent : AmpTheme.inset)
-                .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
-        }
-        .buttonStyle(.plain)
+    private var sectionDivider: some View {
+        Rectangle()
+            .fill(AmpTheme.line)
+            .frame(width: 1, height: 48)
     }
 }
 

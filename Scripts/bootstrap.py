@@ -398,6 +398,7 @@ PBX = r"""// !$*UTF8*$!
 			membershipExceptions = (
 				Amplifier.entitlements,
 				Amplifier-Bridging-Header.h,
+				Info.plist,
 			);
 			target = A16000000000000000000001 /* XzyqrnAmp */;
 		};
@@ -644,9 +645,11 @@ PBX = r"""// !$*UTF8*$!
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_USER_SELECTED_FILES = readwrite;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = App/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "xzyqrn amp";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "Local bass amp. NAM engine by Steven Atkinson.";
+				INFOPLIST_KEY_NSAudioCaptureUsageDescription = "xzyqrn amp records everything playing to the selected output, including other apps, unless Bass only is on.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "xzyqrn amp needs the microphone / iRig input so it can hear your bass.";
 				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -676,9 +679,11 @@ PBX = r"""// !$*UTF8*$!
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_USER_SELECTED_FILES = readwrite;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = App/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "xzyqrn amp";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "Local bass amp. NAM engine by Steven Atkinson.";
+				INFOPLIST_KEY_NSAudioCaptureUsageDescription = "xzyqrn amp records everything playing to the selected output, including other apps, unless Bass only is on.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "xzyqrn amp needs the microphone / iRig input so it can hear your bass.";
 				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
 				LD_RUNPATH_SEARCH_PATHS = (

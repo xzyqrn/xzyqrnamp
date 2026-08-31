@@ -33,6 +33,7 @@ typedef struct AmpRecorderStateSnapshot {
     bool writing;
     int64_t recordedFrames;
     float peak;
+    bool capturingSystemOutput;
 } AmpRecorderStateSnapshot;
 
 void *AmpProcessorShared(void);
@@ -67,6 +68,7 @@ bool AmpProcessorCleanAmpOn(void *p);
 void AmpProcessorSetIROn(void *p, bool on);
 void AmpProcessorSetEQOn(void *p, bool on);
 void AmpProcessorSetBypass(void *p, bool on);
+void AmpProcessorSetTunerMute(void *p, bool on);
 
 void AmpProcessorSetCompOn(void *p, bool on);
 void AmpProcessorSetCompThresholdDb(void *p, float db);
@@ -130,6 +132,7 @@ void AmpRecorderStateReset(void *state);
 void AmpRecorderStateSetArmed(void *state, bool armed);
 void AmpRecorderStateSetBassOnly(void *state, bool bassOnly);
 void AmpRecorderStateSetWriting(void *state, bool writing);
+void AmpRecorderStateSetCapturingSystemOutput(void *state, bool capturing);
 void AmpRecorderStateAddFrames(void *state, int frames, float peak);
 AmpRecorderStateSnapshot AmpRecorderStateGet(void *state);
 

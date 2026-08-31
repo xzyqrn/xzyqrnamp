@@ -162,6 +162,7 @@ struct AmpRecorderStateImpl {
     std::atomic<bool> armed{false};
     std::atomic<bool> recordBassOnly{false};
     std::atomic<bool> writing{false};
+    std::atomic<bool> capturingSystemOutput{false};
     std::atomic<int64_t> recordedFrames{0};
     std::atomic<float> peak{0.0f};
 };
@@ -246,6 +247,7 @@ struct AmpProcessorImpl {
     std::atomic<bool> irOn{false};
     std::atomic<bool> eqOn{false};
     std::atomic<bool> bypass{false};
+    std::atomic<bool> tunerMute{false};
 
     std::atomic<bool> compOn{false};
     std::atomic<float> compThresholdDb{-24.0f};
@@ -515,8 +517,18 @@ void AmpProcessorProcess(void *opaque, const float *input, float *output, int fr
     if (peakIn >= 0.98f)
         p->inputClip.store(true, std::memory_order_relaxed);
 
+    auto silenceOutput = [&]() {
+        std::memset(output, 0, frames * sizeof(float));
+        p->outEnv += 0.12f * (0.0f - p->outEnv);
+        p->outputPeak.store(p->outEnv, std::memory_order_relaxed);
+    };
+
     if (p->bypass.load(std::memory_order_relaxed)) {
         p->tuner.feed(work, frames);
+        if (p->tunerMute.load(std::memory_order_relaxed)) {
+            silenceOutput();
+            return;
+        }
         std::memcpy(output, work, frames * sizeof(float));
         float bypassBand = 0.0f;
         for (int i = 0; i < frames; ++i)
@@ -559,6 +571,11 @@ void AmpProcessorProcess(void *opaque, const float *input, float *output, int fr
     // raw jack input made mains hum look like a permanently held bass note
     // even while the gate had correctly silenced it.
     p->tuner.feed(work, frames);
+
+    if (p->tunerMute.load(std::memory_order_relaxed)) {
+        silenceOutput();
+        return;
+    }
 
     if (p->compOn.load(std::memory_order_relaxed)) {
         p->compressor.setThresholdDb(p->compThresholdDb.load(std::memory_order_relaxed));
@@ -748,6 +765,10 @@ void AmpProcessorSetEQOn(void *opaque, bool on) {
 void AmpProcessorSetBypass(void *opaque, bool on) {
     if (auto *p = asProc(opaque))
         p->bypass.store(on);
+}
+void AmpProcessorSetTunerMute(void *opaque, bool on) {
+    if (auto *p = asProc(opaque))
+        p->tunerMute.store(on);
 }
 
 void AmpProcessorSetCompOn(void *opaque, bool on) {
@@ -1005,6 +1026,7 @@ void AmpRecorderStateReset(void *opaque) {
         return;
     state->armed.store(false, std::memory_order_release);
     state->writing.store(false, std::memory_order_release);
+    state->capturingSystemOutput.store(false, std::memory_order_release);
     state->recordedFrames.store(0, std::memory_order_relaxed);
     state->peak.store(0.0f, std::memory_order_relaxed);
 }
@@ -1022,6 +1044,11 @@ void AmpRecorderStateSetBassOnly(void *opaque, bool bassOnly) {
 void AmpRecorderStateSetWriting(void *opaque, bool writing) {
     if (auto *state = static_cast<AmpRecorderStateImpl *>(opaque))
         state->writing.store(writing, std::memory_order_release);
+}
+
+void AmpRecorderStateSetCapturingSystemOutput(void *opaque, bool capturing) {
+    if (auto *state = static_cast<AmpRecorderStateImpl *>(opaque))
+        state->capturingSystemOutput.store(capturing, std::memory_order_release);
 }
 
 void AmpRecorderStateAddFrames(void *opaque, int frames, float newPeak) {
@@ -1045,5 +1072,6 @@ AmpRecorderStateSnapshot AmpRecorderStateGet(void *opaque) {
     snapshot.writing = state->writing.load(std::memory_order_acquire);
     snapshot.recordedFrames = state->recordedFrames.load(std::memory_order_relaxed);
     snapshot.peak = state->peak.load(std::memory_order_relaxed);
+    snapshot.capturingSystemOutput = state->capturingSystemOutput.load(std::memory_order_acquire);
     return snapshot;
 }

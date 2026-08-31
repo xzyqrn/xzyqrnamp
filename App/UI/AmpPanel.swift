@@ -7,131 +7,164 @@ struct AmpPanel: View {
     var onSavePreset: () -> Void
 
     var body: some View {
-        HStack(alignment: .top, spacing: 16) {
-            StudioCard {
-                VStack(alignment: .leading, spacing: 12) {
-                    SectionLabel(text: "Tuner")
-                    TunerBadge(hz: session.tunerHz, confidence: session.tunerConfidence)
-                    LevelPills(
-                        input: session.inputPeak,
-                        output: session.outputPeak,
-                        inClip: session.inputClip,
-                        outClip: session.outputClip
-                    )
-                    Button("Clear clip") { session.clearClips() }
-                        .buttonStyle(StudioButton())
-                        .opacity(session.inputClip || session.outputClip ? 1 : 0.45)
-                }
-            }
-            .frame(width: 260)
+        EqualHeightHStack(spacing: 12, equalWidths: true) {
+            tunerCard
+            ampCard
+            cabCard
+        }
+    }
 
-            StudioCard {
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack(spacing: 8) {
-                        SectionLabel(text: "Amp")
-                        Spacer()
-                        LEDToggle(isOn: $session.ultraLoOn, title: "Ultra Lo") { session.pushAllParams() }
-                        LEDToggle(isOn: $session.ultraHiOn, title: "Ultra Hi") { session.pushAllParams() }
-                        Text("•")
-                            .foregroundStyle(AmpTheme.faint)
+    private var tunerCard: some View {
+        StudioCard(fillHeight: true) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    SectionLabel(text: "Tuner")
+                    Spacer(minLength: 0)
+                    LEDToggle(isOn: $session.tunerMute, title: "Mute", destructive: true) {
+                        session.pushAllParams()
+                    }
+                    .help(session.tunerMute
+                          ? "Unmute the amp output"
+                          : "Mute the amp while you tune. The beat keeps playing.")
+                }
+                TunerDisplay(
+                    hz: session.tunerHz,
+                    confidence: session.tunerConfidence,
+                    isRunning: session.isRunning
+                )
+                Spacer(minLength: 8)
+                LevelPills(
+                    input: session.inputPeak,
+                    output: session.outputPeak,
+                    inClip: session.inputClip,
+                    outClip: session.outputClip,
+                    compact: true,
+                    onClearClip: { session.clearClips() }
+                )
+            }
+        }
+    }
+
+    private var ampCard: some View {
+        StudioCard(fillHeight: true) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .center, spacing: 8) {
+                    SectionLabel(text: "Amp")
+                    Spacer(minLength: 8)
+                    HStack(spacing: 6) {
                         LEDToggle(isOn: $session.nrOn, title: "NR", onChange: session.pushAllParams)
                         LEDToggle(isOn: $session.gateOn, title: "Gate", onChange: session.pushAllParams)
                         LEDToggle(isOn: $session.eqOn, title: "EQ", onChange: session.pushAllParams)
                         LEDToggle(isOn: $session.namOn, title: "Amp", onChange: session.pushAllParams)
                         LEDToggle(isOn: $session.irOn, title: "IR", onChange: session.pushAllParams)
                     }
+                }
 
-                    HStack(spacing: 16) {
-                        AmpKnob(value: $session.inputGainDb, range: -12...24, label: "Gain", format: dbFormat, onChange: session.pushAllParams)
-                        AmpKnob(value: $session.bassDb, range: -12...12, label: "Bass", format: dbFormat, onChange: session.pushAllParams)
-                        AmpKnob(value: $session.midDb, range: -12...12, label: "Mid", format: dbFormat, onChange: session.pushAllParams)
-                        AmpKnob(value: $session.trebleDb, range: -12...12, label: "Treble", format: dbFormat, onChange: session.pushAllParams)
-                        AmpKnob(value: $session.outputGainDb, range: -24...18, label: "Master", format: dbFormat, onChange: session.pushAllParams)
-                        AmpKnob(value: $session.gateThresholdDb, range: -80 ... -20, label: "Gate", format: dbFormat, onChange: session.pushAllParams)
-                    }
-                    .frame(maxWidth: .infinity)
+                HStack(spacing: 6) {
+                    AmpKnob(value: $session.inputGainDb, range: -12...24, label: "Gain", size: 46, format: dbFormat, onChange: session.pushAllParams)
+                    AmpKnob(value: $session.bassDb, range: -12...12, label: "Bass", size: 46, format: dbFormat, onChange: session.pushAllParams)
+                    AmpKnob(value: $session.midDb, range: -12...12, label: "Mid", size: 46, format: dbFormat, onChange: session.pushAllParams)
+                    AmpKnob(value: $session.trebleDb, range: -12...12, label: "Treble", size: 46, format: dbFormat, onChange: session.pushAllParams)
+                    AmpKnob(value: $session.outputGainDb, range: -24...18, label: "Master", size: 46, format: dbFormat, onChange: session.pushAllParams)
+                    AmpKnob(value: $session.gateThresholdDb, range: -80 ... -20, label: "Gate", size: 46, format: dbFormat, onChange: session.pushAllParams)
+                }
+                .frame(maxWidth: .infinity)
 
-                    HStack(spacing: 6) {
-                        Text("MID FREQ")
-                            .font(AmpTheme.label(9))
-                            .tracking(1.4)
-                            .foregroundStyle(AmpTheme.faint)
-                            .padding(.trailing, 4)
-
-                        let midOptions = ["220 Hz", "450 Hz", "800 Hz", "1.6 kHz", "3.0 kHz"]
-                        ForEach(0..<5, id: \.self) { idx in
-                            let isSel = session.midFreqIndex == idx
-                            Button {
-                                session.midFreqIndex = idx
-                                session.pushAllParams()
-                            } label: {
-                                Text(midOptions[idx])
-                                    .font(AmpTheme.mono(10, weight: isSel ? .bold : .medium))
-                                    .foregroundStyle(isSel ? AmpTheme.accent : AmpTheme.muted)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 4)
-                                    .background(isSel ? AmpTheme.accent.opacity(0.15) : AmpTheme.surfaceRaised)
-                                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                            .strokeBorder(isSel ? AmpTheme.accent.opacity(0.5) : AmpTheme.line, lineWidth: 1)
-                                    )
-                            }
-                            .buttonStyle(.plain)
+                HStack(spacing: 8) {
+                    LEDToggle(isOn: $session.ultraLoOn, title: "Lo") { session.pushAllParams() }
+                        .help("Ultra Lo")
+                    LEDToggle(isOn: $session.ultraHiOn, title: "Hi") { session.pushAllParams() }
+                        .help("Ultra Hi")
+                    Rectangle()
+                        .fill(AmpTheme.line)
+                        .frame(width: 1, height: 16)
+                    Text("MID")
+                        .font(AmpTheme.label(9))
+                        .tracking(1.4)
+                        .foregroundStyle(AmpTheme.faint)
+                    ForEach(Array(midOptions.enumerated()), id: \.offset) { idx, title in
+                        let isSel = session.midFreqIndex == idx
+                        Button {
+                            session.midFreqIndex = idx
+                            session.pushAllParams()
+                        } label: {
+                            Text(title)
+                                .font(AmpTheme.mono(10, weight: isSel ? .bold : .medium))
+                                .foregroundStyle(isSel ? AmpTheme.accent : AmpTheme.muted)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 4)
+                                .background(isSel ? AmpTheme.accent.opacity(0.15) : AmpTheme.surfaceRaised)
+                                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                        .strokeBorder(isSel ? AmpTheme.accent.opacity(0.5) : AmpTheme.line, lineWidth: 1)
+                                )
                         }
+                        .buttonStyle(.plain)
+                    }
+                    Spacer(minLength: 0)
+                }
+
+                Spacer(minLength: 0)
+            }
+        }
+    }
+
+    private var cabCard: some View {
+        StudioCard(fillHeight: true) {
+            VStack(alignment: .leading, spacing: 0) {
+                SectionLabel(text: "Amp / Cabinet")
+                Spacer(minLength: 12)
+                rigRow(
+                    title: "Amp",
+                    value: session.namName,
+                    on: session.namOn,
+                    loadTitle: "Load",
+                    load: onLoadNAM,
+                    clear: session.namPath == nil ? nil : { session.clearNAMToPassthrough() }
+                ) {
+                    session.namOn.toggle()
+                    session.pushAllParams()
+                }
+                Spacer(minLength: 12)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("CABINET")
+                        .font(AmpTheme.label(9))
+                        .tracking(1.5)
+                        .foregroundStyle(AmpTheme.faint)
+                    HStack(spacing: 8) {
+                        Button(action: {
+                            session.irOn.toggle()
+                            session.pushAllParams()
+                        }) {
+                            Circle()
+                                .fill(session.irOn ? AmpTheme.accent : AmpTheme.inset)
+                                .frame(width: 8, height: 8)
+                                .shadow(color: session.irOn ? AmpTheme.accent.opacity(0.7) : .clear, radius: 4)
+                        }
+                        .buttonStyle(.plain)
+                        .help(session.irOn ? "Bypass cabinet" : "Enable cabinet")
+
+                        Picker("", selection: $session.selectedCabinet) {
+                            ForEach(AmpSession.availableCabinets, id: \.id) { cab in
+                                Text(cab.name).tag(cab.id)
+                            }
+                        }
+                        .labelsHidden()
+                        .onChange(of: session.selectedCabinet) { _, cab in
+                            session.selectCabinetNamed(cab)
+                        }
+
+                        Button("Custom", action: onLoadIR)
+                            .buttonStyle(StudioButton())
                     }
                 }
-            }
-
-            StudioCard {
-                VStack(alignment: .leading, spacing: 12) {
-                    SectionLabel(text: "Amp / Cabinet")
-                    loaderRow(
-                        title: "Amp",
-                        value: session.namName,
-                        on: session.namOn,
-                        load: onLoadNAM,
-                        clear: session.namPath == nil ? nil : { session.clearNAMToPassthrough() }
-                    ) {
-                        session.namOn.toggle()
-                        session.pushAllParams()
-                    }
-
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("CABINET")
-                            .font(AmpTheme.label(9))
-                            .tracking(1.5)
-                            .foregroundStyle(AmpTheme.faint)
-                        HStack(spacing: 8) {
-                            Button(action: {
-                                session.irOn.toggle()
-                                session.pushAllParams()
-                            }) {
-                                Circle()
-                                    .fill(session.irOn ? AmpTheme.accent : AmpTheme.inset)
-                                    .frame(width: 8, height: 8)
-                                    .shadow(color: session.irOn ? AmpTheme.accent.opacity(0.7) : .clear, radius: 4)
-                            }
-                            .buttonStyle(.plain)
-
-                            Picker("", selection: $session.selectedCabinet) {
-                                ForEach(AmpSession.availableCabinets, id: \.id) { cab in
-                                    Text(cab.name).tag(cab.id)
-                                }
-                            }
-                            .labelsHidden()
-                            .onChange(of: session.selectedCabinet) { _, cab in
-                                session.selectCabinetNamed(cab)
-                            }
-
-                            Spacer(minLength: 0)
-
-                            Button("Custom", action: onLoadIR)
-                                .buttonStyle(StudioButton())
-                        }
-                    }
-
-                    SectionLabel(text: "Preset")
+                Spacer(minLength: 12)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("PRESET")
+                        .font(AmpTheme.label(9))
+                        .tracking(1.5)
+                        .foregroundStyle(AmpTheme.faint)
                     HStack(spacing: 8) {
                         Picker("", selection: $session.selectedPresetID) {
                             ForEach(session.presets) { preset in
@@ -149,18 +182,22 @@ struct AmpPanel: View {
                     }
                 }
             }
-            .frame(width: 300)
         }
+    }
+
+    private var midOptions: [String] {
+        ["220", "450", "800", "1.6k", "3.0k"]
     }
 
     private var dbFormat: (Double) -> String {
         { String(format: "%+.1f dB", $0) }
     }
 
-    private func loaderRow(
+    private func rigRow(
         title: String,
         value: String,
         on: Bool,
+        loadTitle: String,
         load: @escaping () -> Void,
         clear: (() -> Void)? = nil,
         toggle: @escaping () -> Void
@@ -182,12 +219,12 @@ struct AmpPanel: View {
                     .font(AmpTheme.caption(12))
                     .foregroundStyle(AmpTheme.text)
                     .lineLimit(1)
-                Spacer(minLength: 0)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 if let clear {
                     Button("Clear", action: clear)
                         .buttonStyle(StudioButton())
                 }
-                Button("Load", action: load)
+                Button(loadTitle, action: load)
                     .buttonStyle(StudioButton())
             }
         }

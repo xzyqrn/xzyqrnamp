@@ -146,6 +146,7 @@ bool testRecorderState() {
     }
     AmpRecorderStateReset(state);
     AmpRecorderStateSetBassOnly(state, true);
+    AmpRecorderStateSetCapturingSystemOutput(state, true);
     AmpRecorderStateSetWriting(state, true);
     AmpRecorderStateSetArmed(state, true);
     AmpRecorderStateAddFrames(state, 128, 0.25f);
@@ -153,11 +154,13 @@ bool testRecorderState() {
     const auto active = AmpRecorderStateGet(state);
     AmpRecorderStateSetArmed(state, false);
     AmpRecorderStateSetWriting(state, false);
+    AmpRecorderStateSetCapturingSystemOutput(state, false);
     const auto stopped = AmpRecorderStateGet(state);
     AmpRecorderStateDestroy(state);
     if (!active.armed || !active.recordBassOnly || !active.writing
+        || !active.capturingSystemOutput
         || active.recordedFrames != 192 || std::fabs(active.peak - 0.75f) > 1.0e-6f
-        || stopped.armed || stopped.writing) {
+        || stopped.armed || stopped.writing || stopped.capturingSystemOutput) {
         std::fprintf(stderr, "FAIL: recorder atomic state regression\n");
         return false;
     }
@@ -197,6 +200,7 @@ void disableAllProcessing(void *processor) {
     AmpProcessorSetReverbOn(processor, false);
     AmpProcessorSetUtilityFilterOn(processor, false);
     AmpProcessorSetBypass(processor, false);
+    AmpProcessorSetTunerMute(processor, false);
     AmpProcessorSetInputGainDb(processor, 0.0f);
     AmpProcessorSetOutputGainDb(processor, 0.0f);
     AmpProcessorUnloadNAM(processor);
@@ -235,6 +239,39 @@ bool testEmptyNAMIsPassthrough(void *processor) {
         return false;
     }
     std::puts("Empty NAM passthrough test passed");
+    return true;
+}
+
+bool testTunerMute(void *processor) {
+    AmpProcessorReset(processor, 48000.0, 512);
+    disableAllProcessing(processor);
+    AmpProcessorSetTunerMute(processor, true);
+    constexpr int block = 128;
+    std::vector<float> input(block), output(block);
+    double energy = 0;
+    for (int b = 0; b < 120; ++b) {
+        for (int i = 0; i < block; ++i) {
+            const int frame = b * block + i;
+            input[i] = 0.22f * std::sin(2.0 * M_PI * 110.0 * frame / 48000.0);
+        }
+        AmpProcessorProcess(processor, input.data(), output.data(), block);
+        if (b > 20) {
+            for (float sample : output)
+                energy += static_cast<double>(sample) * sample;
+        }
+    }
+    const AmpMeterState meters = AmpProcessorGetMeters(processor);
+    AmpProcessorSetTunerMute(processor, false);
+    if (energy > 1.0e-8) {
+        std::fprintf(stderr, "FAIL: tuner mute must silence the amp output (energy=%.3g)\n", energy);
+        return false;
+    }
+    if (meters.tunerHz < 100.0f || meters.tunerHz > 120.0f || meters.tunerConfidence < 0.4f) {
+        std::fprintf(stderr, "FAIL: tuner mute must still report pitch (%.1f Hz, conf %.2f)\n",
+            meters.tunerHz, meters.tunerConfidence);
+        return false;
+    }
+    std::puts("Tuner mute test passed");
     return true;
 }
 
@@ -590,6 +627,7 @@ int main(int argc, char **argv) {
     passed = testFIFORequestFrames() && passed;
     passed = testRecorderState() && passed;
     passed = testEmptyNAMIsPassthrough(processor) && passed;
+    passed = testTunerMute(processor) && passed;
     passed = testCleanAmpIsOptIn(processor) && passed;
     passed = testPracticeCleanTransparency(processor) && passed;
     passed = testMainsHumIsNotched(processor) && passed;

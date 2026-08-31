@@ -13,23 +13,24 @@ struct AmpView: View {
     var body: some View {
         VStack(spacing: 0) {
             TopBar()
-            AmpPanel(
-                onLoadNAM: {
-                    importerKind = .nam
-                    showImporter = true
-                },
-                onLoadIR: {
-                    importerKind = .ir
-                    showImporter = true
-                },
-                onSavePreset: { showSave = true }
-            )
+            VStack(spacing: 14) {
+                AmpPanel(
+                    onLoadNAM: {
+                        importerKind = .nam
+                        showImporter = true
+                    },
+                    onLoadIR: {
+                        importerKind = .ir
+                        showImporter = true
+                    },
+                    onSavePreset: { showSave = true }
+                )
+                EffectsRail()
+            }
             .padding(.horizontal, 16)
             .padding(.top, 14)
-            EffectsRail()
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-            Spacer(minLength: 8)
+            .padding(.bottom, 8)
+            Spacer(minLength: 0)
             TransportBar()
         }
         .background(AmpTheme.bg)

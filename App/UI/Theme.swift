@@ -45,25 +45,105 @@ struct SectionLabel: View {
 
 struct StudioCard<Content: View>: View {
     var padding: CGFloat = 12
+    var fillHeight: Bool = false
+    var emphasized: Bool = false
     @ViewBuilder var content: () -> Content
 
     var body: some View {
         content()
             .padding(padding)
+            .frame(maxWidth: .infinity, maxHeight: fillHeight ? .infinity : nil, alignment: .topLeading)
             .background(AmpTheme.surface)
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(AmpTheme.line, lineWidth: 1)
+                    .strokeBorder(emphasized ? AmpTheme.accent.opacity(0.5) : AmpTheme.line, lineWidth: 1)
                     .allowsHitTesting(false)
             )
+    }
+}
+
+/// HStack that stretches every child to the tallest sibling and gives leftover width to flexible views.
+struct EqualHeightHStack: Layout {
+    var spacing: CGFloat = 16
+    var equalWidths: Bool = false
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard !subviews.isEmpty else { return .zero }
+        let proposedWidth: CGFloat
+        if let width = proposal.width, width.isFinite, width > 0 {
+            proposedWidth = width
+        } else {
+            proposedWidth = intrinsicWidth(subviews)
+        }
+        let widths = distributedWidths(for: subviews, in: proposedWidth, height: nil)
+        var height: CGFloat = 0
+        for (index, subview) in subviews.enumerated() {
+            height = max(height, subview.sizeThatFits(ProposedViewSize(width: widths[index], height: nil)).height)
+        }
+        return CGSize(width: proposedWidth, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let widths = distributedWidths(for: subviews, in: bounds.width, height: bounds.height)
+        var x = bounds.minX
+        for (index, subview) in subviews.enumerated() {
+            subview.place(
+                at: CGPoint(x: x, y: bounds.minY),
+                proposal: ProposedViewSize(width: widths[index], height: bounds.height)
+            )
+            x += widths[index] + spacing
+        }
+    }
+
+    private func intrinsicWidth(_ subviews: Subviews) -> CGFloat {
+        subviews.reduce(CGFloat(0)) { $0 + $1.sizeThatFits(.unspecified).width }
+            + spacing * CGFloat(max(0, subviews.count - 1))
+    }
+
+    private func distributedWidths(for subviews: Subviews, in total: CGFloat, height: CGFloat?) -> [CGFloat] {
+        let count = subviews.count
+        let inner = max(0, total - spacing * CGFloat(max(0, count - 1)))
+        guard inner.isFinite else {
+            return subviews.map { $0.sizeThatFits(.unspecified).width }
+        }
+        if equalWidths {
+            return Array(repeating: inner / CGFloat(count), count: count)
+        }
+        var mins: [CGFloat] = []
+        var maxs: [CGFloat] = []
+        for subview in subviews {
+            let minWidth = subview.sizeThatFits(ProposedViewSize(width: 0, height: height)).width
+            let maxWidth = subview.sizeThatFits(ProposedViewSize(width: .infinity, height: height)).width
+            mins.append(minWidth)
+            maxs.append(max(minWidth, min(maxWidth, inner)))
+        }
+        var widths = mins
+        var remaining = inner - mins.reduce(0, +)
+        while remaining > 0.5 {
+            let flexible = (0..<count).filter { maxs[$0] > widths[$0] + 0.5 }
+            if flexible.isEmpty { break }
+            let share = remaining / CGFloat(flexible.count)
+            var used: CGFloat = 0
+            for index in flexible {
+                let add = min(share, maxs[index] - widths[index])
+                widths[index] += add
+                used += add
+            }
+            if used < 0.5 { break }
+            remaining -= used
+        }
+        return widths
     }
 }
 
 struct LEDToggle: View {
     @Binding var isOn: Bool
     var title: String
+    var destructive: Bool = false
     var onChange: () -> Void = {}
+
+    private var onColor: Color { destructive ? AmpTheme.danger : AmpTheme.accent }
 
     var body: some View {
         Button {
@@ -72,21 +152,27 @@ struct LEDToggle: View {
         } label: {
             HStack(spacing: 6) {
                 Circle()
-                    .fill(isOn ? AmpTheme.accent : AmpTheme.inset)
+                    .fill(isOn ? onColor : AmpTheme.inset)
                     .frame(width: 7, height: 7)
-                    .shadow(color: isOn ? AmpTheme.accent.opacity(0.85) : .clear, radius: 5)
+                    .shadow(color: isOn ? onColor.opacity(0.85) : .clear, radius: 5)
                 Text(title.uppercased())
                     .font(AmpTheme.label(10))
-                    .tracking(1.4)
-                    .foregroundStyle(isOn ? AmpTheme.text : AmpTheme.muted)
+                    .tracking(1.1)
+                    .foregroundStyle(isOn ? (destructive ? AmpTheme.danger : AmpTheme.text) : AmpTheme.muted)
+                    .lineLimit(1)
             }
-            .padding(.horizontal, 8)
+            .padding(.horizontal, 7)
             .padding(.vertical, 5)
             .background(AmpTheme.inset)
             .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .strokeBorder(isOn && destructive ? AmpTheme.danger.opacity(0.4) : Color.clear, lineWidth: 1)
+            )
             .contentShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
         }
         .buttonStyle(.plain)
+        .fixedSize()
     }
 }
 

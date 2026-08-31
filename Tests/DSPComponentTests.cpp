@@ -367,6 +367,26 @@ void testCabinetIR() {
     expect(rms(signal, 4096) > 0.005, "cabinet convolution must not mute the signal");
 }
 
+void testTunerLowE() {
+    std::vector<float> signal(kFrames);
+    const double hz = 41.203;
+    for (int i = 0; i < kFrames; ++i) {
+        const double t = i / kSampleRate;
+        const double attack = std::min(1.0, i / 480.0);
+        signal[i] = static_cast<float>(attack * 0.22
+            * (std::sin(2.0 * M_PI * hz * t)
+                + 0.32 * std::sin(2.0 * M_PI * hz * 2.0 * t)
+                + 0.12 * std::sin(2.0 * M_PI * hz * 3.0 * t)));
+    }
+    Tuner tuner;
+    tuner.setSampleRate(kSampleRate);
+    tuner.reset();
+    for (int offset = 0; offset < kFrames; offset += 128)
+        tuner.feed(signal.data() + offset, std::min(128, kFrames - offset));
+    expect(std::fabs(tuner.frequency() - 41.203f) < 1.0f, "tuner must identify low E near 41.2 Hz");
+    expect(tuner.conf() > 0.5f, "low E tuner reading must report useful confidence");
+}
+
 void testTuner() {
     auto signal = bassSignal(0.2f);
     Tuner tuner;
@@ -376,6 +396,7 @@ void testTuner() {
         tuner.feed(signal.data() + offset, std::min(128, kFrames - offset));
     expect(std::fabs(tuner.frequency() - 110.0f) < 2.0f, "tuner must identify A2 near 110 Hz");
     expect(tuner.conf() > 0.5f, "tuner must report useful confidence");
+    testTunerLowE();
 }
 
 void testResampler() {

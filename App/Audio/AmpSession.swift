@@ -73,6 +73,7 @@ final class AmpSession: ObservableObject {
     @Published var irOn = false
     @Published var eqOn = false
     @Published var bypass = false
+    @Published var tunerMute = false
 
     static let availableCabinets: [(id: String, name: String)] = [
         ("bass-8x10.wav", "Ampeg SVT 8x10"),
@@ -161,6 +162,7 @@ final class AmpSession: ObservableObject {
 
     let beatPlayer = BeatPlayer()
     let recorder = Recorder()
+    private let outputTap = SystemOutputTap()
     private var takePlayer: AVAudioPlayer?
     private var takePlaybackDelegate: TakePlaybackDelegate?
 
@@ -598,6 +600,7 @@ final class AmpSession: ObservableObject {
         AmpProcessorSetIROn(processor, irOn)
         AmpProcessorSetEQOn(processor, eqOn)
         AmpProcessorSetBypass(processor, bypass)
+        AmpProcessorSetTunerMute(processor, tunerMute)
         AmpProcessorSetCompOn(processor, compOn)
         AmpProcessorSetCompThresholdDb(processor, Float(compThresholdDb))
         AmpProcessorSetCompRatio(processor, Float(compRatio))
@@ -1286,23 +1289,55 @@ final class AmpSession: ObservableObject {
             recorder.recordBassOnly = recordBassOnly
             try recorder.start(url: url)
             isRecording = true
+            errorMessage = nil
             var next = liveMetrics
             next.recordElapsed = 0
             next.recordPeak = 0
             liveMetrics = next
+            beginSystemOutputCaptureIfNeeded()
         } catch {
             errorMessage = error.localizedDescription
         }
     }
 
+    func applyRecordSource() {
+        recorder.recordBassOnly = recordBassOnly
+        guard isRecording else { return }
+        if recordBassOnly {
+            outputTap.stop()
+        } else {
+            beginSystemOutputCaptureIfNeeded()
+        }
+    }
+
     func stopRecording() {
         guard isRecording else { return }
+        outputTap.stop()
         recorder.stop()
         isRecording = false
         var next = liveMetrics
         next.recordElapsed = recorder.elapsed
         liveMetrics = next
         takes = RecordingStore.loadAll()
+    }
+
+    private func beginSystemOutputCaptureIfNeeded() {
+        guard isRecording, !recordBassOnly else {
+            outputTap.stop()
+            return
+        }
+        if outputTap.isRunning { return }
+        do {
+            try outputTap.start(
+                outputUID: CoreAudioDevices.uid(of: outputDeviceID),
+                preferGlobalTap: analogDuplexRoute,
+                expectedSampleRate: recorder.sampleRate,
+                recorder: recorder
+            )
+        } catch {
+            NSLog("xzyqrn amp system tap failed: \(error.localizedDescription)")
+            errorMessage = "Recording this amp only. To capture other apps, allow System Audio Recording in System Settings → Privacy & Security."
+        }
     }
 
     func playTake(_ take: RecordingTake) {
@@ -1374,6 +1409,7 @@ final class AmpSession: ObservableObject {
     }
 
     private func stopEngineOnly() {
+        outputTap.stop()
         if isRecording {
             stopRecording()
         }

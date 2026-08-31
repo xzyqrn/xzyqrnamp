@@ -22,6 +22,10 @@ final class Recorder: @unchecked Sendable {
         get { AmpRecorderStateGet(state).recordBassOnly }
         set { AmpRecorderStateSetBassOnly(state, newValue) }
     }
+    var capturingSystemOutput: Bool {
+        get { AmpRecorderStateGet(state).capturingSystemOutput }
+        set { AmpRecorderStateSetCapturingSystemOutput(state, newValue) }
+    }
     var recordedFrames: Int64 { AmpRecorderStateGet(state).recordedFrames }
     var peak: Float { AmpRecorderStateGet(state).peak }
     var sampleRate: Double = 48000
