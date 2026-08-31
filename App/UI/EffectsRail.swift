@@ -1,0 +1,115 @@
+import SwiftUI
+
+struct EffectsRail: View {
+    @EnvironmentObject private var session: AmpSession
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                SectionLabel(text: "Pedal chain")
+                Spacer()
+                Text("GAIN → GATE → COMP → OCT → ENV → DRIVE → AMP → IR → EQ → CHO → DLY → REV → FILTER")
+                    .font(AmpTheme.mono(9))
+                    .foregroundStyle(AmpTheme.faint)
+            }
+
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4), spacing: 10) {
+                PedalCard(title: "Comp", pedal: "comp", isOn: $session.compOn) {
+                    AmpKnob(value: $session.compThresholdDb, range: -40 ... -6, label: "Thr", size: 40, format: { String(format: "%.0f dB", $0) }, onChange: session.pushAllParams)
+                    AmpKnob(value: $session.compRatio, range: 1.5...12, label: "Ratio", size: 40, format: { String(format: "%.1f:1", $0) }, onChange: session.pushAllParams)
+                    AmpKnob(value: $session.compMakeupDb, range: 0...12, label: "Make", size: 40, format: { String(format: "%+.1f", $0) }, onChange: session.pushAllParams)
+                }
+                PedalCard(title: "Drive", pedal: "drive", isOn: $session.driveOn) {
+                    AmpKnob(value: $session.driveAmount, range: 0...1, label: "Drive", size: 40, format: pct, onChange: session.pushAllParams)
+                    AmpKnob(value: $session.driveTone, range: 0...1, label: "Tone", size: 40, format: pct, onChange: session.pushAllParams)
+                    AmpKnob(value: $session.driveMix, range: 0...1, label: "Mix", size: 40, format: pct, onChange: session.pushAllParams)
+                }
+                PedalCard(title: "Octaver", pedal: "octaver", isOn: $session.octaverOn) {
+                    AmpKnob(value: $session.octaverMix, range: 0...1, label: "Sub", size: 40, format: pct, onChange: session.pushAllParams)
+                    AmpKnob(value: $session.octaverTone, range: 0...1, label: "Tone", size: 40, format: pct, onChange: session.pushAllParams)
+                }
+                PedalCard(title: "Envelope", pedal: "envelope", isOn: $session.envelopeOn) {
+                    AmpKnob(value: $session.envelopeSensitivity, range: 0...1, label: "Sens", size: 40, format: pct, onChange: session.pushAllParams)
+                    AmpKnob(value: $session.envelopeResonance, range: 0...0.95, label: "Res", size: 40, format: pct, onChange: session.pushAllParams)
+                    AmpKnob(value: $session.envelopeMix, range: 0...1, label: "Mix", size: 40, format: pct, onChange: session.pushAllParams)
+                }
+                PedalCard(title: "Chorus", pedal: "chorus", isOn: $session.chorusOn) {
+                    AmpKnob(value: $session.chorusRate, range: 0.1...4, label: "Rate", size: 40, format: { String(format: "%.2f Hz", $0) }, onChange: session.pushAllParams)
+                    AmpKnob(value: $session.chorusDepth, range: 0...1, label: "Depth", size: 40, format: pct, onChange: session.pushAllParams)
+                    AmpKnob(value: $session.chorusMix, range: 0...1, label: "Mix", size: 40, format: pct, onChange: session.pushAllParams)
+                }
+                PedalCard(title: "Delay", pedal: "delay", isOn: $session.delayOn) {
+                    AmpKnob(value: $session.delayTimeMs, range: 50...600, label: "Time", size: 40, format: { String(format: "%.0f ms", $0) }, onChange: session.pushAllParams)
+                    AmpKnob(value: $session.delayFeedback, range: 0...0.85, label: "Fdbk", size: 40, format: pct, onChange: session.pushAllParams)
+                    AmpKnob(value: $session.delayMix, range: 0...1, label: "Mix", size: 40, format: pct, onChange: session.pushAllParams)
+                }
+                PedalCard(title: "Reverb", pedal: "reverb", isOn: $session.reverbOn) {
+                    AmpKnob(value: $session.reverbSize, range: 0...1, label: "Size", size: 40, format: pct, onChange: session.pushAllParams)
+                    AmpKnob(value: $session.reverbDamp, range: 0...1, label: "Damp", size: 40, format: pct, onChange: session.pushAllParams)
+                    AmpKnob(value: $session.reverbMix, range: 0...1, label: "Mix", size: 40, format: pct, onChange: session.pushAllParams)
+                }
+                PedalCard(title: "Utility", pedal: "filter", isOn: $session.utilityFilterOn) {
+                    AmpKnob(value: $session.highPassHz, range: 20...180, label: "HPF", size: 40, format: { String(format: "%.0f Hz", $0) }, onChange: session.pushAllParams)
+                    AmpKnob(value: $session.lowPassHz, range: 1200...16000, label: "LPF", size: 40, format: { $0 >= 1000 ? String(format: "%.1f k", $0 / 1000) : String(format: "%.0f", $0) }, onChange: session.pushAllParams)
+                }
+            }
+        }
+    }
+
+    private var pct: (Double) -> String {
+        { String(format: "%.0f%%", $0 * 100) }
+    }
+}
+
+private struct PedalCard<Knobs: View>: View {
+    @EnvironmentObject private var session: AmpSession
+    let title: String
+    let pedal: String
+    @Binding var isOn: Bool
+    @ViewBuilder var knobs: () -> Knobs
+
+    var body: some View {
+        StudioCard(padding: 10) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text(title.uppercased())
+                        .font(AmpTheme.label(11))
+                        .tracking(1.5)
+                        .foregroundStyle(AmpTheme.text)
+                    Spacer()
+                    LEDToggle(isOn: $isOn, title: isOn ? "On" : "Off") {
+                        session.pushAllParams()
+                    }
+                }
+                HStack(spacing: 8) {
+                    knobs()
+                }
+                .frame(maxWidth: .infinity)
+                Menu {
+                    ForEach(PedalFactoryPreset.presets(for: pedal)) { preset in
+                        Button(preset.name) {
+                            session.applyPedalPreset(preset)
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text("Presets")
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 8, weight: .bold))
+                    }
+                    .font(AmpTheme.label(10))
+                    .foregroundStyle(AmpTheme.muted)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(AmpTheme.inset)
+                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                    .contentShape(Rectangle())
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .opacity(isOn ? 1 : 0.72)
+    }
+}

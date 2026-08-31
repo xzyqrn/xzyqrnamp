@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    :root { color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; background: #111315; color: #e9ece6; }
+    #toolbar {
+      position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 12px;
+      min-height: 52px; padding: 9px 14px; background: rgba(25, 28, 31, .97);
+      border-bottom: 1px solid #34383b; backdrop-filter: blur(16px);
+    }
+    #identity { min-width: 0; flex: 1; }
+    #title { font-size: 14px; font-weight: 700; letter-spacing: .04em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #artist { color: #929a92; font-size: 11px; margin-top: 2px; }
+    label { color: #929a92; font-size: 10px; font-weight: 700; letter-spacing: .12em; }
+    select {
+      min-width: 190px; max-width: 310px; padding: 7px 28px 7px 9px; border: 1px solid #42484b;
+      border-radius: 6px; background: #202427; color: #e9ece6; font: inherit;
+    }
+    #status { padding: 36px 20px; color: #9ba39b; text-align: center; }
+    #score { min-height: calc(100vh - 52px); padding: 14px 4px 34px; background: #f5f3ed; }
+    #score:empty { display: none; }
+    .at-surface { box-shadow: none !important; }
+  </style>
+</head>
+<body>
+  <div id="toolbar">
+    <div id="identity">
+      <div id="title">Guitar Pro tab</div>
+      <div id="artist">Loading local file…</div>
+    </div>
+    <label for="tracks">TRACK</label>
+    <select id="tracks" disabled><option>Loading…</option></select>
+  </div>
+  <div id="status">Reading Guitar Pro score…</div>
+  <div id="score"></div>
+  <script src="xzyqrn-tab://viewer/alphaTab.min.js"></script>
+  <script>
+    const scoreElement = document.querySelector('#score');
+    const statusElement = document.querySelector('#status');
+    const trackSelect = document.querySelector('#tracks');
+    const api = new alphaTab.AlphaTabApi(scoreElement, {
+      core: {
+        useWorkers: false,
+        enableLazyLoading: true,
+        fontDirectory: 'xzyqrn-tab://viewer/font/'
+      },
+      display: {
+        scale: 0.9,
+        resources: {
+          mainGlyphColor: '#171918',
+          secondaryGlyphColor: '#525852',
+          staffLineColor: '#777d77',
+          barSeparatorColor: '#333633'
+        }
+      },
+      player: { enablePlayer: false }
+    });
+
+    api.error.on(error => {
+      statusElement.style.display = 'block';
+      statusElement.textContent = 'Could not read this Guitar Pro file: ' + (error.message || error);
+    });
+
+    api.scoreLoaded.on(score => {
+      document.querySelector('#title').textContent = score.title || score.subTitle || 'Guitar Pro tab';
+      document.querySelector('#artist').textContent = score.artist || score.album || 'Local Guitar Pro file';
+      trackSelect.innerHTML = '';
+      score.tracks.forEach((track, index) => {
+        const option = document.createElement('option');
+        option.value = String(index);
+        option.textContent = track.name || track.shortName || ('Track ' + (index + 1));
+        trackSelect.appendChild(option);
+      });
+      const bassIndex = score.tracks.findIndex(track => {
+        const name = ((track.name || '') + ' ' + (track.shortName || '')).toLowerCase();
+        const program = track.playbackInfo ? track.playbackInfo.program : -1;
+        return name.includes('bass') || (program >= 32 && program <= 39);
+      });
+      const selected = bassIndex >= 0 ? bassIndex : 0;
+      trackSelect.value = String(selected);
+      trackSelect.disabled = false;
+      statusElement.style.display = 'none';
+      if (selected !== 0) api.renderTracks([score.tracks[selected]]);
+    });
+
+    trackSelect.addEventListener('change', () => {
+      const track = api.score && api.score.tracks[Number(trackSelect.value)];
+      if (track) api.renderTracks([track]);
+    });
+
+    fetch('xzyqrn-tab://viewer/score.gp')
+      .then(response => response.arrayBuffer())
+      .then(data => api.load(data))
+      .catch(error => {
+        statusElement.textContent = 'Could not open this file: ' + error.message;
+      });
+  </script>
+</body>
+</html>

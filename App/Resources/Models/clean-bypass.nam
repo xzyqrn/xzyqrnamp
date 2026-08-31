@@ -1,0 +1,17 @@
+{
+  "version": "0.5.4",
+  "architecture": "Linear",
+  "config": {
+    "receptive_field": 1,
+    "bias": true
+  },
+  "weights": [1.0, 0.0],
+  "sample_rate": 48000,
+  "metadata": {
+    "name": "Clean Bypass",
+    "modeled_by": "xzyqrn amp",
+    "gear_make": "Bypass",
+    "gear_model": "Identity",
+    "tone_type": "clean"
+  }
+}

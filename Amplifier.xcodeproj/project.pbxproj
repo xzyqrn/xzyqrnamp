@@ -1,0 +1,352 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A11000000000000000000001 /* Accelerate.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A12000000000000000000001 /* Accelerate.framework */; };
+		A11000000000000000000002 /* AudioToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A12000000000000000000002 /* AudioToolbox.framework */; };
+		A11000000000000000000003 /* AudioUnit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A12000000000000000000003 /* AudioUnit.framework */; };
+		A11000000000000000000004 /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A12000000000000000000004 /* AVFoundation.framework */; };
+		A11000000000000000000005 /* CoreAudio.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A12000000000000000000005 /* CoreAudio.framework */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		A12000000000000000000001 /* Accelerate.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Accelerate.framework; path = System/Library/Frameworks/Accelerate.framework; sourceTree = SDKROOT; };
+		A12000000000000000000002 /* AudioToolbox.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AudioToolbox.framework; path = System/Library/Frameworks/AudioToolbox.framework; sourceTree = SDKROOT; };
+		A12000000000000000000003 /* AudioUnit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AudioUnit.framework; path = System/Library/Frameworks/AudioUnit.framework; sourceTree = SDKROOT; };
+		A12000000000000000000004 /* AVFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFoundation.framework; path = System/Library/Frameworks/AVFoundation.framework; sourceTree = SDKROOT; };
+		A12000000000000000000005 /* CoreAudio.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreAudio.framework; path = System/Library/Frameworks/CoreAudio.framework; sourceTree = SDKROOT; };
+		A13000000000000000000001 /* xzyqrn amp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "xzyqrn amp.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		A14000000000000000000001 /* Exceptions for App */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Amplifier.entitlements,
+				Amplifier-Bridging-Header.h,
+			);
+			target = A16000000000000000000001 /* XzyqrnAmp */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		A15000000000000000000001 /* App */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				A14000000000000000000001 /* Exceptions for App */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		A15000000000000000000002 /* NAM */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Vendor/NeuralAmpModelerCore/NAM;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A17000000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A11000000000000000000001 /* Accelerate.framework in Frameworks */,
+				A11000000000000000000002 /* AudioToolbox.framework in Frameworks */,
+				A11000000000000000000003 /* AudioUnit.framework in Frameworks */,
+				A11000000000000000000004 /* AVFoundation.framework in Frameworks */,
+				A11000000000000000000005 /* CoreAudio.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A18000000000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				A15000000000000000000001 /* App */,
+				A15000000000000000000002 /* NAM */,
+				A18000000000000000000002 /* Frameworks */,
+				A18000000000000000000003 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A18000000000000000000002 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				A12000000000000000000001 /* Accelerate.framework */,
+				A12000000000000000000002 /* AudioToolbox.framework */,
+				A12000000000000000000003 /* AudioUnit.framework */,
+				A12000000000000000000004 /* AVFoundation.framework */,
+				A12000000000000000000005 /* CoreAudio.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		A18000000000000000000003 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A13000000000000000000001 /* xzyqrn amp.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A16000000000000000000001 /* XzyqrnAmp */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A19000000000000000000001 /* Build configuration list for PBXNativeTarget "XzyqrnAmp" */;
+			buildPhases = (
+				A17000000000000000000002 /* Sources */,
+				A17000000000000000000001 /* Frameworks */,
+				A17000000000000000000003 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				A15000000000000000000001 /* App */,
+				A15000000000000000000002 /* NAM */,
+			);
+			name = XzyqrnAmp;
+			productName = XzyqrnAmp;
+			productReference = A13000000000000000000001 /* xzyqrn amp.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A1A000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2630;
+				LastUpgradeCheck = 2630;
+				TargetAttributes = {
+					A16000000000000000000001 = {
+						CreatedOnToolsVersion = 26.3;
+					};
+				};
+			};
+			buildConfigurationList = A19000000000000000000002 /* Build configuration list for PBXProject "Amplifier" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = A18000000000000000000001;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = A18000000000000000000003 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A16000000000000000000001 /* XzyqrnAmp */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A17000000000000000000003 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A17000000000000000000002 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		A1B000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_CXX_LANGUAGE_STANDARD = "c++20";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_TESTABILITY = YES;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 2;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+					"NAM_ENABLE_A2_FAST=1",
+					"EIGEN_DONT_PARALLELIZE=1",
+					"EIGEN_MPL2_ONLY=1",
+				);
+				GCC_WARN_ABOUT_RETURN_TYPE = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(SRCROOT)/Vendor/NeuralAmpModelerCore",
+					"$(SRCROOT)/Vendor/NeuralAmpModelerCore/NAM",
+					"$(SRCROOT)/Vendor/NeuralAmpModelerCore/Dependencies/eigen",
+					"$(SRCROOT)/Vendor/NeuralAmpModelerCore/Dependencies/nlohmann",
+					"$(SRCROOT)/App/DSP",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		A1B000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_CXX_LANGUAGE_STANDARD = "c++20";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 3;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"NAM_ENABLE_A2_FAST=1",
+					"EIGEN_DONT_PARALLELIZE=1",
+					"EIGEN_MPL2_ONLY=1",
+					"NDEBUG=1",
+				);
+				GCC_WARN_ABOUT_RETURN_TYPE = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(SRCROOT)/Vendor/NeuralAmpModelerCore",
+					"$(SRCROOT)/Vendor/NeuralAmpModelerCore/NAM",
+					"$(SRCROOT)/Vendor/NeuralAmpModelerCore/Dependencies/eigen",
+					"$(SRCROOT)/Vendor/NeuralAmpModelerCore/Dependencies/nlohmann",
+					"$(SRCROOT)/App/DSP",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+			};
+			name = Release;
+		};
+		A1B000000000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = App/Amplifier.entitlements;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_USER_SELECTED_FILES = readwrite;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "xzyqrn amp";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "xzyqrn amp needs the microphone / iRig input so it can hear your bass.";
+				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.herojay.Amplifier;
+				PRODUCT_NAME = "xzyqrn amp";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "App/Amplifier-Bridging-Header.h";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		A1B000000000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = App/Amplifier.entitlements;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_USER_SELECTED_FILES = readwrite;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "xzyqrn amp";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "xzyqrn amp needs the microphone / iRig input so it can hear your bass.";
+				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.herojay.Amplifier;
+				PRODUCT_NAME = "xzyqrn amp";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "App/Amplifier-Bridging-Header.h";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A19000000000000000000001 /* Build configuration list for PBXNativeTarget "XzyqrnAmp" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A1B000000000000000000003 /* Debug */,
+				A1B000000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A19000000000000000000002 /* Build configuration list for PBXProject "Amplifier" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A1B000000000000000000001 /* Debug */,
+				A1B000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = A1A000000000000000000001 /* Project object */;
+}

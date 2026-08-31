@@ -1,0 +1,176 @@
+[
+  {
+    "id": "slap-comp",
+    "name": "Slap Comp",
+    "pedal": "comp",
+    "values": { "compThresholdDb": -18, "compRatio": 6, "compMakeupDb": 4 }
+  },
+  {
+    "id": "studio-comp",
+    "name": "Studio",
+    "pedal": "comp",
+    "values": { "compThresholdDb": -22, "compRatio": 3, "compMakeupDb": 2 }
+  },
+  {
+    "id": "warm-drive",
+    "name": "Warm Drive",
+    "pedal": "drive",
+    "values": { "driveAmount": 0.4, "driveTone": 0.45, "driveMix": 0.55 }
+  },
+  {
+    "id": "grind",
+    "name": "Grind",
+    "pedal": "drive",
+    "values": { "driveAmount": 0.72, "driveTone": 0.62, "driveMix": 0.48 }
+  },
+  {
+    "id": "deep-chorus",
+    "name": "Deep Chorus",
+    "pedal": "chorus",
+    "values": { "chorusRate": 0.6, "chorusDepth": 0.7, "chorusMix": 0.45 }
+  },
+  {
+    "id": "subtle-chorus",
+    "name": "Shimmer",
+    "pedal": "chorus",
+    "values": { "chorusRate": 1.4, "chorusDepth": 0.28, "chorusMix": 0.22 }
+  },
+  {
+    "id": "slapback",
+    "name": "Slapback",
+    "pedal": "delay",
+    "values": { "delayTimeMs": 95, "delayFeedback": 0.08, "delayMix": 0.28 }
+  },
+  {
+    "id": "echo",
+    "name": "Echo",
+    "pedal": "delay",
+    "values": { "delayTimeMs": 320, "delayFeedback": 0.38, "delayMix": 0.24 }
+  },
+  {
+    "id": "room",
+    "name": "Room",
+    "pedal": "reverb",
+    "values": { "reverbSize": 0.28, "reverbDamp": 0.5, "reverbMix": 0.22 }
+  },
+  {
+    "id": "hall",
+    "name": "Hall",
+    "pedal": "reverb",
+    "values": { "reverbSize": 0.72, "reverbDamp": 0.35, "reverbMix": 0.32 }
+  },
+  {
+    "id": "punch-comp",
+    "name": "Fast Punch",
+    "pedal": "comp",
+    "values": { "compThresholdDb": -16, "compRatio": 4.5, "compMakeupDb": 3 }
+  },
+  {
+    "id": "vintage-leveler",
+    "name": "Vintage Leveler",
+    "pedal": "comp",
+    "values": { "compThresholdDb": -28, "compRatio": 2.5, "compMakeupDb": 3.5 }
+  },
+  {
+    "id": "tube-grit",
+    "name": "Tube Grit",
+    "pedal": "drive",
+    "values": { "driveAmount": 0.52, "driveTone": 0.38, "driveMix": 0.42 }
+  },
+  {
+    "id": "modern-fuzz",
+    "name": "Modern Fuzz",
+    "pedal": "drive",
+    "values": { "driveAmount": 0.92, "driveTone": 0.72, "driveMix": 0.68 }
+  },
+  {
+    "id": "deep-sub",
+    "name": "Deep Sub",
+    "pedal": "octaver",
+    "values": { "octaverMix": 0.55, "octaverTone": 0.28 }
+  },
+  {
+    "id": "synth-sub",
+    "name": "Synth Sub",
+    "pedal": "octaver",
+    "values": { "octaverMix": 0.72, "octaverTone": 0.62 }
+  },
+  {
+    "id": "subtle-thickener",
+    "name": "Subtle Thickener",
+    "pedal": "octaver",
+    "values": { "octaverMix": 0.20, "octaverTone": 0.50 }
+  },
+  {
+    "id": "funk-quack",
+    "name": "Funk Quack",
+    "pedal": "envelope",
+    "values": { "envelopeSensitivity": 0.72, "envelopeResonance": 0.68, "envelopeMix": 0.78 }
+  },
+  {
+    "id": "slow-vowel",
+    "name": "Slow Vowel",
+    "pedal": "envelope",
+    "values": { "envelopeSensitivity": 0.32, "envelopeResonance": 0.55, "envelopeMix": 0.62 }
+  },
+  {
+    "id": "dub-bubble",
+    "name": "Dub Bubble",
+    "pedal": "envelope",
+    "values": { "envelopeSensitivity": 0.48, "envelopeResonance": 0.82, "envelopeMix": 0.72 }
+  },
+  {
+    "id": "wide-chorus",
+    "name": "Wide Bass",
+    "pedal": "chorus",
+    "values": { "chorusRate": 0.42, "chorusDepth": 0.78, "chorusMix": 0.38 }
+  },
+  {
+    "id": "fretless-glass",
+    "name": "Fretless Glass",
+    "pedal": "chorus",
+    "values": { "chorusRate": 0.72, "chorusDepth": 0.52, "chorusMix": 0.32 }
+  },
+  {
+    "id": "dub-delay",
+    "name": "Dub Echo",
+    "pedal": "delay",
+    "values": { "delayTimeMs": 430, "delayFeedback": 0.58, "delayMix": 0.32 }
+  },
+  {
+    "id": "eighth-delay",
+    "name": "Eighth Echo",
+    "pedal": "delay",
+    "values": { "delayTimeMs": 250, "delayFeedback": 0.28, "delayMix": 0.20 }
+  },
+  {
+    "id": "plate",
+    "name": "Studio Plate",
+    "pedal": "reverb",
+    "values": { "reverbSize": 0.48, "reverbDamp": 0.26, "reverbMix": 0.24 }
+  },
+  {
+    "id": "ambient-space",
+    "name": "Ambient Space",
+    "pedal": "reverb",
+    "values": { "reverbSize": 0.92, "reverbDamp": 0.18, "reverbMix": 0.44 }
+  },
+  {
+    "id": "clean-stage",
+    "name": "Clean Stage",
+    "pedal": "filter",
+    "values": { "highPassHz": 35, "lowPassHz": 12500 }
+  },
+  {
+    "id": "tight-modern",
+    "name": "Tight Modern",
+    "pedal": "filter",
+    "values": { "highPassHz": 48, "lowPassHz": 9000 }
+  },
+  {
+    "id": "vintage-speaker",
+    "name": "Vintage Speaker",
+    "pedal": "filter",
+    "values": { "highPassHz": 42, "lowPassHz": 4800 }
+  }
+]

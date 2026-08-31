@@ -1,0 +1,16 @@
+{
+  "id": "practice",
+  "name": "Practice",
+  "inputGainDb": 3,
+  "outputGainDb": 0,
+  "gateThresholdDb": -40,
+  "bassDb": 1.5,
+  "midDb": 0,
+  "trebleDb": -1.5,
+  "gateOn": true,
+  "namOn": true,
+  "irOn": true,
+  "eqOn": true,
+  "namFile": "",
+  "irFile": "bass-4x10.wav"
+}
