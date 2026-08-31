@@ -6,6 +6,32 @@ import Foundation
 import SwiftUI
 import UniformTypeIdentifiers
 
+private final class TakePlaybackDelegate: NSObject, AVAudioPlayerDelegate {
+    var onFinish: (() -> Void)?
+
+    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        onFinish?()
+    }
+
+    func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
+        onFinish?()
+    }
+}
+
+private struct LiveMetrics {
+    var inputPeak: Double = 0
+    var outputPeak: Double = 0
+    var inputRmsDb: Double = -120
+    var noiseFloorDb: Double = -120
+    var audioDiagnostic = "Power on, then stop playing for a moment to measure the input."
+    var inputClip = false
+    var outputClip = false
+    var tunerHz: Double = 0
+    var tunerConfidence: Double = 0
+    var recordElapsed: TimeInterval = 0
+    var recordPeak: Double = 0
+}
+
 @MainActor
 final class AmpSession: ObservableObject {
     @Published var isRunning = false
@@ -89,15 +115,16 @@ final class AmpSession: ObservableObject {
     @Published var namPath: URL?
     @Published var irPath: URL?
 
-    @Published var inputPeak: Double = 0
-    @Published var outputPeak: Double = 0
-    @Published var inputRmsDb: Double = -120
-    @Published var noiseFloorDb: Double = -120
-    @Published var audioDiagnostic = "Power on, then stop playing for a moment to measure the input."
-    @Published var inputClip = false
-    @Published var outputClip = false
-    @Published var tunerHz: Double = 0
-    @Published var tunerConfidence: Double = 0
+    @Published private var liveMetrics = LiveMetrics()
+    var inputPeak: Double { liveMetrics.inputPeak }
+    var outputPeak: Double { liveMetrics.outputPeak }
+    var inputRmsDb: Double { liveMetrics.inputRmsDb }
+    var noiseFloorDb: Double { liveMetrics.noiseFloorDb }
+    var audioDiagnostic: String { liveMetrics.audioDiagnostic }
+    var inputClip: Bool { liveMetrics.inputClip }
+    var outputClip: Bool { liveMetrics.outputClip }
+    var tunerHz: Double { liveMetrics.tunerHz }
+    var tunerConfidence: Double { liveMetrics.tunerConfidence }
 
     @Published var presets: [AmpPreset] = AmpPreset.bundled
     @Published var selectedPresetID: String = AmpPreset.bundled.first?.id ?? "practice"
@@ -112,8 +139,8 @@ final class AmpSession: ObservableObject {
     private var lastTempoTap: TimeInterval?
 
     @Published var isRecording = false
-    @Published var recordElapsed: TimeInterval = 0
-    @Published var recordPeak: Double = 0
+    var recordElapsed: TimeInterval { liveMetrics.recordElapsed }
+    var recordPeak: Double { liveMetrics.recordPeak }
     @Published var recordBassOnly = false
     @Published var takes: [RecordingTake] = []
     @Published var playingTakeID: String?
@@ -121,6 +148,7 @@ final class AmpSession: ObservableObject {
     let beatPlayer = BeatPlayer()
     let recorder = Recorder()
     private var takePlayer: AVAudioPlayer?
+    private var takePlaybackDelegate: TakePlaybackDelegate?
 
     private var engine = AVAudioEngine()
     private var sinkNode: AVAudioSinkNode?
@@ -476,16 +504,33 @@ final class AmpSession: ObservableObject {
     func applyLiveSettings() {
         guard !isStarting else { return }
         Task {
+            let wasRunning = isRunning
             isStarting = true
             status = "Applying audio route…"
             defer { isStarting = false }
             do {
                 refreshDevices()
                 try validateSelectedDevices()
-                try await startEngine()
+                if wasRunning {
+                    try await startEngine()
+                } else {
+                    try applyHardware()
+                    hardwareSampleRate = CoreAudioDevices.currentSampleRate(device: outputDeviceID)
+                    if hardwareSampleRate < 1 {
+                        hardwareSampleRate = CoreAudioDevices.currentSampleRate(device: inputDeviceID)
+                    }
+                    hardwareBuffer = CoreAudioDevices.currentBufferFrameSize(device: outputDeviceID)
+                    if hardwareBuffer == 0 {
+                        hardwareBuffer = CoreAudioDevices.currentBufferFrameSize(device: inputDeviceID)
+                    }
+                    if hardwareBuffer == 0 { hardwareBuffer = bufferSize }
+                    latencyMs = 1000.0 * Double(hardwareBuffer * 2) / max(hardwareSampleRate, 1)
+                    status = "Off"
+                    errorMessage = nil
+                }
             } catch {
                 errorMessage = Self.describeAudioError(error)
-                status = "Couldn't restart audio"
+                status = wasRunning ? "Couldn't restart audio" : "Couldn't apply audio route"
             }
         }
     }
@@ -629,12 +674,18 @@ final class AmpSession: ObservableObject {
 
     func clearClips() {
         AmpProcessorClearClips(processor)
-        inputClip = false
-        outputClip = false
+        var next = liveMetrics
+        next.inputClip = false
+        next.outputClip = false
+        liveMetrics = next
     }
 
     func applyPreset(_ preset: AmpPreset) {
+        var resourceErrors: [String] = []
         selectedPresetID = preset.id
+        // Selecting a preset means the user wants to hear that processing
+        // chain. Leaving global bypass engaged made every preset appear inert.
+        bypass = false
         inputGainDb = preset.inputGainDb
         outputGainDb = preset.outputGainDb
         gateThresholdDb = preset.gateThresholdDb
@@ -680,20 +731,51 @@ final class AmpSession: ObservableObject {
         ultraHiOn = preset.ultraHiOn
         selectedCabinet = preset.irFile.isEmpty ? "bass-4x10.wav" : preset.irFile
         pushAllParams()
-        if let bookmark = preset.namBookmark,
-           let url = resolveBookmark(bookmark, refreshKey: Self.lastNAMBookmarkKey) {
-            _ = loadNAM(url: url)
+        if let bookmark = preset.namBookmark {
+            if let url = resolveBookmark(bookmark, refreshKey: Self.lastNAMBookmarkKey) {
+                if !loadNAM(url: url) {
+                    resourceErrors.append("Capture “\(preset.namFile)” could not be loaded: \(errorMessage ?? "unknown error")")
+                    unloadNAM()
+                }
+            } else {
+                unloadNAM()
+                resourceErrors.append("Capture “\(preset.namFile)” is no longer available. Reconnect it and save the preset again.")
+            }
         } else if Self.isBundledCleanNAM(preset.namFile) || preset.namFile.isEmpty {
             unloadNAM()
             pushAllParams()
         } else if let nam = bundledURL(preset.namFile, ext: "nam", sub: "Models") {
-            _ = loadNAM(url: nam)
+            if !loadNAM(url: nam) {
+                resourceErrors.append("Capture “\(preset.namFile)” could not be loaded: \(errorMessage ?? "unknown error")")
+                unloadNAM()
+            }
+        } else {
+            unloadNAM()
+            resourceErrors.append("Capture “\(preset.namFile)” is missing from the app.")
         }
-        if let bookmark = preset.irBookmark,
-           let url = resolveBookmark(bookmark, refreshKey: Self.lastIRBookmarkKey) {
-            _ = loadIR(url: url)
+        if let bookmark = preset.irBookmark {
+            if let url = resolveBookmark(bookmark, refreshKey: Self.lastIRBookmarkKey) {
+                if !loadIR(url: url) {
+                    resourceErrors.append("Cabinet “\(preset.irFile)” could not be loaded: \(errorMessage ?? "unknown error")")
+                    unloadIR()
+                }
+            } else {
+                unloadIR()
+                resourceErrors.append("Cabinet “\(preset.irFile)” is no longer available. Reconnect it and save the preset again.")
+            }
+        } else if preset.irFile.isEmpty {
+            unloadIR()
         } else if let ir = bundledURL(preset.irFile, ext: "wav", sub: "IRs") {
-            _ = loadIR(url: ir)
+            if !loadIR(url: ir) {
+                resourceErrors.append("Cabinet “\(preset.irFile)” could not be loaded: \(errorMessage ?? "unknown error")")
+                unloadIR()
+            }
+        } else {
+            unloadIR()
+            resourceErrors.append("Cabinet “\(preset.irFile)” is missing from the app.")
+        }
+        if !resourceErrors.isEmpty {
+            errorMessage = resourceErrors.joined(separator: "\n")
         }
     }
 
@@ -980,17 +1062,18 @@ final class AmpSession: ObservableObject {
 
     private func tickMeters() {
         let meters = AmpProcessorGetMeters(processor)
-        inputPeak = Double(meters.inputPeak)
-        outputPeak = Double(meters.outputPeak)
-        inputRmsDb = Double(meters.inputRmsDb)
-        noiseFloorDb = Double(meters.noiseFloorDb)
-        inputClip = meters.inputClip
-        outputClip = meters.outputClip
-        tunerHz = Double(meters.tunerHz)
-        tunerConfidence = Double(meters.tunerConfidence)
+        var next = liveMetrics
+        next.inputPeak = Double(meters.inputPeak)
+        next.outputPeak = Double(meters.outputPeak)
+        next.inputRmsDb = Double(meters.inputRmsDb)
+        next.noiseFloorDb = Double(meters.noiseFloorDb)
+        next.inputClip = meters.inputClip
+        next.outputClip = meters.outputClip
+        next.tunerHz = Double(meters.tunerHz)
+        next.tunerConfidence = Double(meters.tunerConfidence)
         if isRecording {
-            recordElapsed = recorder.elapsed
-            recordPeak = Double(recorder.peak)
+            next.recordElapsed = recorder.elapsed
+            next.recordPeak = Double(recorder.peak)
         }
 
         if let renderState {
@@ -998,19 +1081,19 @@ final class AmpSession: ObservableObject {
             let underflowDelta = fifo.underflowFrames &- lastFIFOUnderflowFrames
             let overflowDelta = fifo.overflowFrames &- lastFIFOOverflowFrames
             if underflowDelta > UInt64(max(hardwareBuffer, 64)) {
-                audioDiagnostic = "Output is starving: raise the buffer to 256 or 512 samples. This causes clicks, not cable hiss."
+                next.audioDiagnostic = "Output is starving: raise the buffer to 256 or 512 samples. This causes clicks, not cable hiss."
             } else if overflowDelta > UInt64(max(hardwareBuffer, 64)) {
-                audioDiagnostic = "Input/output clocks are drifting: use one interface for both input and output, or Follow device."
+                next.audioDiagnostic = "Input/output clocks are drifting: use one interface for both input and output, or Follow device."
             } else if meters.inputClip {
-                audioDiagnostic = "The analog input is clipping. Lower the bass/interface output or input level."
-            } else if noiseFloorDb > -45 {
-                audioDiagnostic = "High analog noise. Check the instrument cable, bass jack, iRig plug, shielding, and Mac charger."
-            } else if noiseFloorDb > -60 {
-                audioDiagnostic = "Moderate analog noise. Try another cable and unplug the Mac charger as a comparison."
-            } else if noiseFloorDb > -115 {
-                audioDiagnostic = "Input path looks quiet. Any remaining regular clicks are more likely buffer-related."
+                next.audioDiagnostic = "The analog input is clipping. Lower the bass/interface output or input level."
+            } else if next.noiseFloorDb > -45 {
+                next.audioDiagnostic = "High analog noise. Check the instrument cable, bass jack, iRig plug, shielding, and Mac charger."
+            } else if next.noiseFloorDb > -60 {
+                next.audioDiagnostic = "Moderate analog noise. Try another cable and unplug the Mac charger as a comparison."
+            } else if next.noiseFloorDb > -115 {
+                next.audioDiagnostic = "Input path looks quiet. Any remaining regular clicks are more likely buffer-related."
             } else {
-                audioDiagnostic = "Measuring idle input… stop playing for about one second."
+                next.audioDiagnostic = "Measuring idle input… stop playing for about one second."
             }
             if fifo.underflowFrames != lastFIFOUnderflowFrames
                 || fifo.overflowFrames != lastFIFOOverflowFrames {
@@ -1024,6 +1107,7 @@ final class AmpSession: ObservableObject {
                 lastFIFOOverflowFrames = fifo.overflowFrames
             }
         }
+        liveMetrics = next
     }
 
     func applyPedalPreset(_ preset: PedalFactoryPreset) {
@@ -1122,8 +1206,10 @@ final class AmpSession: ObservableObject {
             recorder.recordBassOnly = recordBassOnly
             try recorder.start(url: url)
             isRecording = true
-            recordElapsed = 0
-            recordPeak = 0
+            var next = liveMetrics
+            next.recordElapsed = 0
+            next.recordPeak = 0
+            liveMetrics = next
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -1133,7 +1219,9 @@ final class AmpSession: ObservableObject {
         guard isRecording else { return }
         recorder.stop()
         isRecording = false
-        recordElapsed = recorder.elapsed
+        var next = liveMetrics
+        next.recordElapsed = recorder.elapsed
+        liveMetrics = next
         takes = RecordingStore.loadAll()
     }
 
@@ -1141,13 +1229,22 @@ final class AmpSession: ObservableObject {
         stopTakePlayback()
         do {
             let accessing = take.url.startAccessingSecurityScopedResource()
+            defer { if accessing { take.url.stopAccessingSecurityScopedResource() } }
             let player = try AVAudioPlayer(contentsOf: take.url)
+            let delegate = TakePlaybackDelegate()
+            delegate.onFinish = { [weak self, weak player] in
+                Task { @MainActor in
+                    guard let self, self.takePlayer === player else { return }
+                    self.stopTakePlayback()
+                }
+            }
+            player.delegate = delegate
             player.prepareToPlay()
             if player.play() {
                 takePlayer = player
+                takePlaybackDelegate = delegate
                 playingTakeID = take.id
             }
-            if accessing { take.url.stopAccessingSecurityScopedResource() }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -1156,6 +1253,7 @@ final class AmpSession: ObservableObject {
     func stopTakePlayback() {
         takePlayer?.stop()
         takePlayer = nil
+        takePlaybackDelegate = nil
         playingTakeID = nil
     }
 
@@ -1212,14 +1310,6 @@ final class AmpSession: ObservableObject {
         lastFIFOUnderflowFrames = 0
         lastFIFOOverflowFrames = 0
         isRunning = false
-        inputPeak = 0
-        outputPeak = 0
-        inputRmsDb = -120
-        noiseFloorDb = -120
-        audioDiagnostic = "Power on, then stop playing for a moment to measure the input."
-        inputClip = false
-        outputClip = false
-        tunerHz = 0
-        tunerConfidence = 0
+        liveMetrics = LiveMetrics()
     }
 }

@@ -53,6 +53,14 @@ struct AmpAudioFIFOImpl {
     std::atomic<uint64_t> underflowFrames{0};
 };
 
+struct AmpRecorderStateImpl {
+    std::atomic<bool> armed{false};
+    std::atomic<bool> recordBassOnly{false};
+    std::atomic<bool> writing{false};
+    std::atomic<int64_t> recordedFrames{0};
+    std::atomic<float> peak{0.0f};
+};
+
 class InputConditioner {
 public:
     void setSampleRate(double sr) {
@@ -859,4 +867,65 @@ AmpAudioFIFOStats AmpAudioFIFOGetStats(void *opaque) {
     stats.underflowFrames = fifo->underflowFrames.load(std::memory_order_relaxed);
     stats.availableFrames = AmpAudioFIFOAvailable(opaque);
     return stats;
+}
+
+void *AmpRecorderStateCreate(void) {
+    try {
+        return new AmpRecorderStateImpl();
+    } catch (...) {
+        return nullptr;
+    }
+}
+
+void AmpRecorderStateDestroy(void *opaque) {
+    delete static_cast<AmpRecorderStateImpl *>(opaque);
+}
+
+void AmpRecorderStateReset(void *opaque) {
+    auto *state = static_cast<AmpRecorderStateImpl *>(opaque);
+    if (!state)
+        return;
+    state->armed.store(false, std::memory_order_release);
+    state->writing.store(false, std::memory_order_release);
+    state->recordedFrames.store(0, std::memory_order_relaxed);
+    state->peak.store(0.0f, std::memory_order_relaxed);
+}
+
+void AmpRecorderStateSetArmed(void *opaque, bool armed) {
+    if (auto *state = static_cast<AmpRecorderStateImpl *>(opaque))
+        state->armed.store(armed, std::memory_order_release);
+}
+
+void AmpRecorderStateSetBassOnly(void *opaque, bool bassOnly) {
+    if (auto *state = static_cast<AmpRecorderStateImpl *>(opaque))
+        state->recordBassOnly.store(bassOnly, std::memory_order_release);
+}
+
+void AmpRecorderStateSetWriting(void *opaque, bool writing) {
+    if (auto *state = static_cast<AmpRecorderStateImpl *>(opaque))
+        state->writing.store(writing, std::memory_order_release);
+}
+
+void AmpRecorderStateAddFrames(void *opaque, int frames, float newPeak) {
+    auto *state = static_cast<AmpRecorderStateImpl *>(opaque);
+    if (!state || frames <= 0)
+        return;
+    state->recordedFrames.fetch_add(frames, std::memory_order_relaxed);
+    float current = state->peak.load(std::memory_order_relaxed);
+    while (newPeak > current
+           && !state->peak.compare_exchange_weak(current, newPeak, std::memory_order_relaxed)) {
+    }
+}
+
+AmpRecorderStateSnapshot AmpRecorderStateGet(void *opaque) {
+    AmpRecorderStateSnapshot snapshot{};
+    auto *state = static_cast<AmpRecorderStateImpl *>(opaque);
+    if (!state)
+        return snapshot;
+    snapshot.armed = state->armed.load(std::memory_order_acquire);
+    snapshot.recordBassOnly = state->recordBassOnly.load(std::memory_order_acquire);
+    snapshot.writing = state->writing.load(std::memory_order_acquire);
+    snapshot.recordedFrames = state->recordedFrames.load(std::memory_order_relaxed);
+    snapshot.peak = state->peak.load(std::memory_order_relaxed);
+    return snapshot;
 }

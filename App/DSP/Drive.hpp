@@ -10,14 +10,20 @@
 class Drive {
 public:
     void setSampleRate(double sr) {
-        sampleRate = sr > 1.0 ? sr : 48000.0;
-        dirty = true;
+        const double next = sr > 1.0 ? sr : 48000.0;
+        if (sampleRate != next) {
+            sampleRate = next;
+            dirty = true;
+        }
     }
 
     void setAmount(float v) { amount = std::clamp(v, 0.0f, 1.0f); }
     void setTone(float v) {
-        tone = std::clamp(v, 0.0f, 1.0f);
-        dirty = true;
+        const float next = std::clamp(v, 0.0f, 1.0f);
+        if (tone != next) {
+            tone = next;
+            dirty = true;
+        }
     }
     void setMix(float v) { mix = std::clamp(v, 0.0f, 1.0f); }
 
@@ -76,4 +82,3 @@ private:
         dirty = false;
     }
 };
-

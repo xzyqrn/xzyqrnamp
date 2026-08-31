@@ -7,6 +7,7 @@ class BassOctaver {
 public:
     void setSampleRate(double sampleRate) {
         sr = std::max(sampleRate, 8000.0);
+        refreshToneCoefficient();
         reset();
     }
 
@@ -18,11 +19,15 @@ public:
     }
 
     void setMix(float value) { mix = std::clamp(value, 0.0f, 1.0f); }
-    void setTone(float value) { tone = std::clamp(value, 0.0f, 1.0f); }
+    void setTone(float value) {
+        const float next = std::clamp(value, 0.0f, 1.0f);
+        if (tone != next) {
+            tone = next;
+            refreshToneCoefficient();
+        }
+    }
 
     void process(float *samples, int frames) {
-        const float cutoff = 70.0f + tone * 520.0f;
-        const float coeff = 1.0f - std::exp(-2.0f * float(M_PI) * cutoff / float(sr));
         for (int i = 0; i < frames; ++i) {
             const float dry = samples[i];
             envelope += (std::fabs(dry) - envelope) * (std::fabs(dry) > envelope ? 0.035f : 0.0025f);
@@ -30,7 +35,7 @@ public:
                 polarity = -polarity;
             last = dry;
             const float target = polarity * envelope * 1.45f;
-            sub += coeff * (target - sub);
+            sub += toneCoefficient * (target - sub);
             samples[i] = dry * (1.0f - mix) + sub * mix;
         }
     }
@@ -43,6 +48,12 @@ private:
     float polarity = 1.0f;
     float envelope = 0.0f;
     float sub = 0.0f;
+    float toneCoefficient = 1.0f - std::exp(-2.0f * float(M_PI) * (70.0f + 0.45f * 520.0f) / 48000.0f);
+
+    void refreshToneCoefficient() {
+        const float cutoff = 70.0f + tone * 520.0f;
+        toneCoefficient = 1.0f - std::exp(-2.0f * float(M_PI) * cutoff / float(sr));
+    }
 };
 
 class BassEnvelopeFilter {
@@ -93,24 +104,34 @@ class BassUtilityFilter {
 public:
     void setSampleRate(double sampleRate) {
         sr = std::max(sampleRate, 8000.0);
+        refreshHighPassCoefficient();
+        refreshLowPassCoefficient();
         lowState = 0.0f;
         highState = 0.0f;
         previous = 0.0f;
     }
 
-    void setHighPass(float hz) { highPass = std::clamp(hz, 20.0f, 180.0f); }
-    void setLowPass(float hz) { lowPass = std::clamp(hz, 1200.0f, 16000.0f); }
+    void setHighPass(float hz) {
+        const float next = std::clamp(hz, 20.0f, 180.0f);
+        if (highPass != next) {
+            highPass = next;
+            refreshHighPassCoefficient();
+        }
+    }
+    void setLowPass(float hz) {
+        const float next = std::clamp(hz, 1200.0f, 16000.0f);
+        if (lowPass != next) {
+            lowPass = next;
+            refreshLowPassCoefficient();
+        }
+    }
 
     void process(float *samples, int frames) {
-        const float lowAlpha = 1.0f - std::exp(-2.0f * float(M_PI) * lowPass / float(sr));
-        const float highRC = 1.0f / (2.0f * float(M_PI) * highPass);
-        const float dt = 1.0f / float(sr);
-        const float highAlpha = highRC / (highRC + dt);
         for (int i = 0; i < frames; ++i) {
             const float input = samples[i];
-            highState = highAlpha * (highState + input - previous);
+            highState = highPassCoefficient * (highState + input - previous);
             previous = input;
-            lowState += lowAlpha * (highState - lowState);
+            lowState += lowPassCoefficient * (highState - lowState);
             samples[i] = lowState;
         }
     }
@@ -122,4 +143,16 @@ private:
     float lowState = 0.0f;
     float highState = 0.0f;
     float previous = 0.0f;
+    float highPassCoefficient = 0.995828f;
+    float lowPassCoefficient = 0.792120f;
+
+    void refreshHighPassCoefficient() {
+        const float rc = 1.0f / (2.0f * float(M_PI) * highPass);
+        const float dt = 1.0f / float(sr);
+        highPassCoefficient = rc / (rc + dt);
+    }
+
+    void refreshLowPassCoefficient() {
+        lowPassCoefficient = 1.0f - std::exp(-2.0f * float(M_PI) * lowPass / float(sr));
+    }
 };

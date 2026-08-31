@@ -26,8 +26,11 @@ public:
     }
 
     void setSize(float v) {
-        size = std::clamp(v, 0.0f, 1.0f);
-        refreshLengths();
+        const float next = std::clamp(v, 0.0f, 1.0f);
+        if (size != next) {
+            size = next;
+            refreshLengths();
+        }
     }
     void setDamp(float v) { damp = std::clamp(v, 0.0f, 1.0f); }
     void setMix(float v) { mix = std::clamp(v, 0.0f, 1.0f); }

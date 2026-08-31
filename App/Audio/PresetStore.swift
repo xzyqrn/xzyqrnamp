@@ -258,11 +258,12 @@ struct AmpPreset: Identifiable, Codable, Hashable {
         AmpPreset(
             id: "practice",
             name: "Practice Clean",
-            inputGainDb: 3, outputGainDb: 0, gateThresholdDb: -40,
-            bassDb: 1.5, midDb: 0, trebleDb: -1.5,
+            inputGainDb: 0, outputGainDb: 0, gateThresholdDb: -40,
+            bassDb: 1.5, midDb: 0, trebleDb: -3,
             gateOn: true, namOn: true, irOn: true, eqOn: true,
             namFile: "", irFile: "bass-4x10.wav",
-            compOn: true, compThresholdDb: -22, compRatio: 3.5, compMakeupDb: 2.0,
+            compOn: false, compThresholdDb: -22, compRatio: 3.5, compMakeupDb: 0,
+            utilityFilterOn: true, highPassHz: 35, lowPassHz: 5000,
             midFreqIndex: 1, ultraLoOn: false, ultraHiOn: false
         ),
         AmpPreset(

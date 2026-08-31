@@ -275,6 +275,19 @@ void testResampler() {
     expect(produced == expected, "resampler must produce the calculated frame count");
     expect(finite(output), "resampler output must remain finite");
     expect(rms(output, 4096) > 0.005, "resampler must preserve an audible signal");
+
+    // One second split into normal render callbacks must produce the same
+    // number of frames as a one-shot conversion. This catches per-block
+    // rounding drift that eventually fills one of the streaming queues.
+    resampler.setRates(48000.0, 44100.0);
+    std::vector<float> block(128, 0.1f);
+    std::vector<float> converted(128, 0.0f);
+    int streamingFrames = 0;
+    for (int i = 0; i < 375; ++i) {
+        const int target = resampler.calcOutFrames(block.size());
+        streamingFrames += resampler.process(block.data(), block.size(), converted.data(), target);
+    }
+    expect(streamingFrames == 44100, "streaming resampler must preserve the exact long-run sample-rate ratio");
 }
 
 } // namespace

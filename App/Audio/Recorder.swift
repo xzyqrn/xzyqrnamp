@@ -13,22 +13,27 @@ struct RecordingTake: Identifiable, Hashable {
 /// Audio-thread capture into a lock-free FIFO; a background queue drains to WAV.
 final class Recorder: @unchecked Sendable {
     private let fifo: UnsafeMutableRawPointer
+    private let state: UnsafeMutableRawPointer
     private let queue = DispatchQueue(label: "com.herojay.Amplifier.recorder", qos: .userInitiated)
     private var file: AVAudioFile?
-    private var writing = false
 
-    var armed = false
-    var recordBassOnly = false
-    var recordedFrames: Int64 = 0
-    var peak: Float = 0
+    var armed: Bool { AmpRecorderStateGet(state).armed }
+    var recordBassOnly: Bool {
+        get { AmpRecorderStateGet(state).recordBassOnly }
+        set { AmpRecorderStateSetBassOnly(state, newValue) }
+    }
+    var recordedFrames: Int64 { AmpRecorderStateGet(state).recordedFrames }
+    var peak: Float { AmpRecorderStateGet(state).peak }
     var sampleRate: Double = 48000
 
     init() {
         fifo = AmpAudioFIFOCreate(48_000 * 12)!
+        state = AmpRecorderStateCreate()!
     }
 
     deinit {
         AmpAudioFIFODestroy(fifo)
+        AmpRecorderStateDestroy(state)
     }
 
     func prepare(sampleRate: Double) {
@@ -44,8 +49,7 @@ final class Recorder: @unchecked Sendable {
             )
         }
         AmpAudioFIFOClear(fifo)
-        recordedFrames = 0
-        peak = 0
+        AmpRecorderStateReset(state)
         try queue.sync {
             let settings: [String: Any] = [
                 AVFormatIDKey: Int(kAudioFormatLinearPCM),
@@ -57,9 +61,9 @@ final class Recorder: @unchecked Sendable {
                 AVLinearPCMIsNonInterleaved: false
             ]
             file = try AVAudioFile(forWriting: url, settings: settings)
-            writing = true
+            AmpRecorderStateSetWriting(state, true)
         }
-        armed = true
+        AmpRecorderStateSetArmed(state, true)
         queue.async { [weak self] in
             self?.drainLoop()
         }
@@ -67,19 +71,19 @@ final class Recorder: @unchecked Sendable {
 
     func push(_ samples: UnsafePointer<Float>, frames: Int) {
         guard armed, frames > 0 else { return }
+        let written = Int(AmpAudioFIFOWrite(fifo, samples, Int32(frames)))
+        guard written > 0 else { return }
         var localPeak: Float = 0
-        for i in 0..<frames {
+        for i in 0..<written {
             let a = fabsf(samples[i])
             if a > localPeak { localPeak = a }
         }
-        if localPeak > peak { peak = localPeak }
-        _ = AmpAudioFIFOWrite(fifo, samples, Int32(frames))
-        recordedFrames += Int64(frames)
+        AmpRecorderStateAddFrames(state, Int32(written), localPeak)
     }
 
     func stop() {
-        armed = false
-        writing = false
+        AmpRecorderStateSetArmed(state, false)
+        AmpRecorderStateSetWriting(state, false)
         queue.sync { [weak self] in
             self?.drainRemaining()
             self?.file = nil
@@ -93,7 +97,7 @@ final class Recorder: @unchecked Sendable {
 
     private func drainLoop() {
         var scratch = [Float](repeating: 0, count: 4096)
-        while writing {
+        while AmpRecorderStateGet(state).writing {
             let n = Int(AmpAudioFIFORead(fifo, &scratch, 4096))
             if n > 0 {
                 write(scratch, count: n)

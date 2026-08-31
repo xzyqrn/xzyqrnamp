@@ -26,6 +26,14 @@ typedef struct AmpAudioFIFOStats {
     int availableFrames;
 } AmpAudioFIFOStats;
 
+typedef struct AmpRecorderStateSnapshot {
+    bool armed;
+    bool recordBassOnly;
+    bool writing;
+    int64_t recordedFrames;
+    float peak;
+} AmpRecorderStateSnapshot;
+
 void *AmpProcessorShared(void);
 
 bool AmpProcessorLoadNAM(void *p, const char *path, char *err, int errLen);
@@ -105,6 +113,16 @@ int AmpAudioFIFOWrite(void *fifo, const float *samples, int frames);
 int AmpAudioFIFORead(void *fifo, float *samples, int frames);
 int AmpAudioFIFOAvailable(void *fifo);
 AmpAudioFIFOStats AmpAudioFIFOGetStats(void *fifo);
+
+// Atomics shared by the main, audio-render, and recorder-writer threads.
+void *AmpRecorderStateCreate(void);
+void AmpRecorderStateDestroy(void *state);
+void AmpRecorderStateReset(void *state);
+void AmpRecorderStateSetArmed(void *state, bool armed);
+void AmpRecorderStateSetBassOnly(void *state, bool bassOnly);
+void AmpRecorderStateSetWriting(void *state, bool writing);
+void AmpRecorderStateAddFrames(void *state, int frames, float peak);
+AmpRecorderStateSnapshot AmpRecorderStateGet(void *state);
 
 #ifdef __cplusplus
 }

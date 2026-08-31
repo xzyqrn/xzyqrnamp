@@ -20,6 +20,7 @@ public:
     void reset() {
         x[0] = x[1] = x[2] = x[3] = 0.0f;
         pha = 0.0;
+        outputFrameRemainder = 0.0;
         queue.assign(kQueueCap, 0.0f);
         qHead = 0;
         qTail = 0;
@@ -29,10 +30,16 @@ public:
 
     bool needsConvert() const { return active; }
 
-    int calcOutFrames(int inFrames) const {
+    int calcOutFrames(int inFrames) {
         if (!active)
             return inFrames;
-        return std::max(1, static_cast<int>(std::lround(inFrames * (outRate_ / inRate_))));
+        // Carry the fractional frame across callbacks. Rounding every block
+        // independently creates a permanent rate mismatch (for example,
+        // 128 frames at 48 kHz is 117.6 frames at 44.1 kHz, not 118 forever).
+        const double exactFrames = outputFrameRemainder + inFrames * (outRate_ / inRate_);
+        const int frames = std::max(1, static_cast<int>(std::floor(exactFrames + 1.0e-9)));
+        outputFrameRemainder = exactFrames - frames;
+        return frames;
     }
 
     int process(const float *in, int nIn, float *out, int maxOut) {
@@ -97,6 +104,7 @@ private:
     double outRate_ = 48000.0;
     double increment = 1.0;
     double pha = 0.0;
+    double outputFrameRemainder = 0.0;
     float x[4] = {0.0f, 0.0f, 0.0f, 0.0f};
 
     std::vector<float> queue = std::vector<float>(kQueueCap, 0.0f);
@@ -112,4 +120,3 @@ private:
         return ((c3 * t + c2) * t + c1) * t + c0;
     }
 };
-

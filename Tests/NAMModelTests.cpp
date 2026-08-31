@@ -138,6 +138,33 @@ bool testFIFO() {
     return true;
 }
 
+bool testRecorderState() {
+    void *state = AmpRecorderStateCreate();
+    if (!state) {
+        std::fprintf(stderr, "FAIL: recorder state allocation\n");
+        return false;
+    }
+    AmpRecorderStateReset(state);
+    AmpRecorderStateSetBassOnly(state, true);
+    AmpRecorderStateSetWriting(state, true);
+    AmpRecorderStateSetArmed(state, true);
+    AmpRecorderStateAddFrames(state, 128, 0.25f);
+    AmpRecorderStateAddFrames(state, 64, 0.75f);
+    const auto active = AmpRecorderStateGet(state);
+    AmpRecorderStateSetArmed(state, false);
+    AmpRecorderStateSetWriting(state, false);
+    const auto stopped = AmpRecorderStateGet(state);
+    AmpRecorderStateDestroy(state);
+    if (!active.armed || !active.recordBassOnly || !active.writing
+        || active.recordedFrames != 192 || std::fabs(active.peak - 0.75f) > 1.0e-6f
+        || stopped.armed || stopped.writing) {
+        std::fprintf(stderr, "FAIL: recorder atomic state regression\n");
+        return false;
+    }
+    std::puts("Recorder atomic state test passed");
+    return true;
+}
+
 bool testPreset(void *processor, const json &preset, const std::filesystem::path &resourceRoot) {
     AmpProcessorReset(processor, 48000.0, 1024);
     AmpProcessorSetInputGainDb(processor, value<float>(preset, "inputGainDb", 0.0f));
@@ -268,6 +295,7 @@ int main(int argc, char **argv) {
     AmpProcessorSetOutputGainDb(processor, 0.0f);
 
     bool passed = testFIFO();
+    passed = testRecorderState() && passed;
     for (int i = 3; i < argc; ++i)
         passed = testModel(processor, argv[i]) && passed;
 

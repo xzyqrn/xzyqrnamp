@@ -15,7 +15,13 @@ public:
 
     void setThresholdDb(float db) { thresholdDb = std::clamp(db, -60.0f, 0.0f); }
     void setRatio(float r) { ratio = std::max(1.0f, r); }
-    void setMakeupDb(float db) { makeup = std::pow(10.0f, std::clamp(db, 0.0f, 24.0f) / 20.0f); }
+    void setMakeupDb(float db) {
+        const float clamped = std::clamp(db, 0.0f, 24.0f);
+        if (makeupDb != clamped) {
+            makeupDb = clamped;
+            makeup = std::pow(10.0f, makeupDb / 20.0f);
+        }
+    }
 
     void reset() {
         envelopeDb = -80.0f;
@@ -59,6 +65,7 @@ private:
     double sampleRate = 48000.0;
     float thresholdDb = -24.0f;
     float ratio = 4.0f;
+    float makeupDb = 0.0f;
     float makeup = 1.0f;
     float envelopeDb = -80.0f;
     float gain = 1.0f;
@@ -67,4 +74,3 @@ private:
     float scHpfCoeff = 0.012f;
     float scHpfState = 0.0f;
 };
-
