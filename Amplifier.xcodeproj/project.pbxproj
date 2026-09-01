@@ -283,7 +283,7 @@
 				INFOPLIST_FILE = App/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "xzyqrn amp";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 xzyqrn";
 				INFOPLIST_KEY_NSAudioCaptureUsageDescription = "xzyqrn amp records everything playing to the selected output, including other apps, unless Bass only is on.";
 				INFOPLIST_KEY_NSCameraUsageDescription = "xzyqrn amp uses the camera when you record a video take. Audio still comes from the amp, not the camera microphone.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "xzyqrn amp needs the microphone / iRig input so it can hear your bass.";
@@ -318,7 +318,7 @@
 				INFOPLIST_FILE = App/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "xzyqrn amp";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 xzyqrn";
 				INFOPLIST_KEY_NSAudioCaptureUsageDescription = "xzyqrn amp records everything playing to the selected output, including other apps, unless Bass only is on.";
 				INFOPLIST_KEY_NSCameraUsageDescription = "xzyqrn amp uses the camera when you record a video take. Audio still comes from the amp, not the camera microphone.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "xzyqrn amp needs the microphone / iRig input so it can hear your bass.";
