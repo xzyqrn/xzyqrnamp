@@ -12,6 +12,7 @@
 		A11000000000000000000003 /* AudioUnit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A12000000000000000000003 /* AudioUnit.framework */; };
 		A11000000000000000000004 /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A12000000000000000000004 /* AVFoundation.framework */; };
 		A11000000000000000000005 /* CoreAudio.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A12000000000000000000005 /* CoreAudio.framework */; };
+		A11000000000000000000006 /* AVKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A12000000000000000000006 /* AVKit.framework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -20,6 +21,7 @@
 		A12000000000000000000003 /* AudioUnit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AudioUnit.framework; path = System/Library/Frameworks/AudioUnit.framework; sourceTree = SDKROOT; };
 		A12000000000000000000004 /* AVFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFoundation.framework; path = System/Library/Frameworks/AVFoundation.framework; sourceTree = SDKROOT; };
 		A12000000000000000000005 /* CoreAudio.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreAudio.framework; path = System/Library/Frameworks/CoreAudio.framework; sourceTree = SDKROOT; };
+		A12000000000000000000006 /* AVKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVKit.framework; path = System/Library/Frameworks/AVKit.framework; sourceTree = SDKROOT; };
 		A13000000000000000000001 /* xzyqrn amp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "xzyqrn amp.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -61,6 +63,7 @@
 				A11000000000000000000003 /* AudioUnit.framework in Frameworks */,
 				A11000000000000000000004 /* AVFoundation.framework in Frameworks */,
 				A11000000000000000000005 /* CoreAudio.framework in Frameworks */,
+				A11000000000000000000006 /* AVKit.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -85,6 +88,7 @@
 				A12000000000000000000003 /* AudioUnit.framework */,
 				A12000000000000000000004 /* AVFoundation.framework */,
 				A12000000000000000000005 /* CoreAudio.framework */,
+				A12000000000000000000006 /* AVKit.framework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -281,6 +285,7 @@
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSAudioCaptureUsageDescription = "xzyqrn amp records everything playing to the selected output, including other apps, unless Bass only is on.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "xzyqrn amp uses the camera when you record a video take. Audio still comes from the amp, not the camera microphone.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "xzyqrn amp needs the microphone / iRig input so it can hear your bass.";
 				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -315,6 +320,7 @@
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSAudioCaptureUsageDescription = "xzyqrn amp records everything playing to the selected output, including other apps, unless Bass only is on.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "xzyqrn amp uses the camera when you record a video take. Audio still comes from the amp, not the camera microphone.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "xzyqrn amp needs the microphone / iRig input so it can hear your bass.";
 				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
 				LD_RUNPATH_SEARCH_PATHS = (

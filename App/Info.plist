@@ -4,5 +4,7 @@
 <dict>
 	<key>NSAudioCaptureUsageDescription</key>
 	<string>xzyqrn amp records everything playing to the selected output, including other apps, unless Bass only is on.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>xzyqrn amp uses the camera when you record a video take. Audio still comes from the amp, not the camera microphone.</string>
 </dict>
 </plist>

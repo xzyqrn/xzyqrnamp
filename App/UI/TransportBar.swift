@@ -5,21 +5,44 @@ struct TransportBar: View {
     @State private var showTakes = false
 
     var body: some View {
-        HStack(alignment: .center, spacing: 16) {
-            beatSection
-            Spacer(minLength: 8)
-            sectionDivider
-            recordSection
-            sectionDivider
-            Spacer(minLength: 8)
-            extrasSection
+        ViewThatFits(in: .horizontal) {
+            singleRow
+            wrappedRows
         }
+        .frame(maxWidth: .infinity)
         .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.vertical, 10)
         .frame(minHeight: 76)
         .background(AmpTheme.surface)
         .overlay(alignment: .top) {
             Rectangle().fill(AmpTheme.line).frame(height: 1)
+        }
+    }
+
+    private var singleRow: some View {
+        HStack(alignment: .center, spacing: 16) {
+            beatSection.fixedSize(horizontal: true, vertical: false)
+            Spacer(minLength: 8)
+            sectionDivider
+            recordSection.fixedSize(horizontal: true, vertical: false)
+            sectionDivider
+            Spacer(minLength: 8)
+            extrasSection.fixedSize(horizontal: true, vertical: false)
+        }
+    }
+
+    private var wrappedRows: some View {
+        VStack(spacing: 10) {
+            HStack(alignment: .center, spacing: 12) {
+                beatSection
+                Spacer(minLength: 8)
+                extrasSection
+            }
+            HStack {
+                Spacer(minLength: 0)
+                recordSection
+                Spacer(minLength: 0)
+            }
         }
     }
 
@@ -100,7 +123,7 @@ struct TransportBar: View {
                     RoundedRectangle(cornerRadius: session.isRecording ? 2 : 8, style: .continuous)
                         .fill(AmpTheme.danger)
                         .frame(width: session.isRecording ? 10 : 12, height: session.isRecording ? 10 : 12)
-                    Text(session.isRecording ? "STOP" : "REC")
+                    Text(session.isFinishingRecording ? "WAIT" : (session.isRecording ? "STOP" : "REC"))
                         .font(AmpTheme.label(11))
                         .tracking(1.4)
                 }
@@ -116,16 +139,24 @@ struct TransportBar: View {
                 )
             }
             .buttonStyle(.plain)
-            .disabled(!session.isRunning && !session.isRecording)
-            .opacity(session.isRunning || session.isRecording ? 1 : 0.45)
+            .disabled((!session.isRunning && !session.isRecording) || session.isFinishingRecording)
+            .opacity(session.isRunning || session.isRecording || session.isFinishingRecording ? 1 : 0.45)
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(elapsed)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(session.isFinishingRecording ? "Finishing" : elapsed)
                     .font(AmpTheme.mono(16, weight: .semibold))
                     .foregroundStyle(session.isRecording ? AmpTheme.danger : AmpTheme.text)
                 VUMeter(level: session.isRecording ? session.recordPeak : 0, clip: session.recordPeak > 0.95, label: "REC")
                     .frame(width: 140)
             }
+
+            RecordModePicker(
+                selection: Binding(
+                    get: { session.recordMode },
+                    set: { session.setRecordMode($0) }
+                ),
+                enabled: !session.isRecording && !session.isFinishingRecording
+            )
         }
     }
 
@@ -134,7 +165,7 @@ struct TransportBar: View {
             LEDToggle(isOn: $session.recordBassOnly, title: "Bass only") {
                 session.applyRecordSource()
             }
-            .help("Off records everything playing to the selected output, including other apps. On records processed bass only.")
+            .help("Off records everything playing to the selected output, including other apps. On records processed bass only. Applies to both audio and video takes.")
 
             Button {
                 session.takes = RecordingStore.loadAll()
@@ -152,7 +183,7 @@ struct TransportBar: View {
             .popover(isPresented: $showTakes, arrowEdge: .top) {
                 TakesList()
                     .environmentObject(session)
-                    .frame(width: 360, height: 280)
+                    .frame(width: 380, height: 280)
             }
         }
     }
@@ -194,12 +225,18 @@ private struct TakesList: View {
                 List {
                     ForEach(session.takes) { take in
                         HStack {
+                            Image(systemName: take.isVideo ? "video.fill" : "waveform")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(take.isVideo ? AmpTheme.accent : AmpTheme.muted)
+                                .frame(width: 16)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(take.name)
                                     .font(AmpTheme.caption(12))
                                     .foregroundStyle(AmpTheme.text)
                                     .lineLimit(1)
-                                Text(String(format: "%.1f s", take.duration))
+                                Text(take.isVideo
+                                     ? String(format: "Video · %.1f s", take.duration)
+                                     : String(format: "%.1f s", take.duration))
                                     .font(AmpTheme.mono(10))
                                     .foregroundStyle(AmpTheme.faint)
                             }

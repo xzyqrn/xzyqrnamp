@@ -1,6 +1,32 @@
 import AVFoundation
+import CoreMedia
 import Darwin
 import Foundation
+
+enum RecordMode: String, CaseIterable, Identifiable {
+    case audio
+    case video
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .audio: return "Audio"
+        case .video: return "Video"
+        }
+    }
+
+    var fileExtension: String {
+        switch self {
+        case .audio: return "wav"
+        case .video: return "mov"
+        }
+    }
+}
+
+protocol RecordedAudioSink: AnyObject {
+    func appendRecordedAudio(_ samples: [Float], count: Int)
+}
 
 struct RecordingTake: Identifiable, Hashable {
     var id: String { url.path }
@@ -8,6 +34,10 @@ struct RecordingTake: Identifiable, Hashable {
     let name: String
     let date: Date
     let duration: TimeInterval
+
+    var isVideo: Bool {
+        ["mov", "mp4", "m4v"].contains(url.pathExtension.lowercased())
+    }
 }
 
 /// Audio-thread capture into a lock-free FIFO; a background queue drains to WAV.
@@ -16,6 +46,21 @@ final class Recorder: @unchecked Sendable {
     private let state: UnsafeMutableRawPointer
     private let queue = DispatchQueue(label: "com.herojay.Amplifier.recorder", qos: .userInitiated)
     private var file: AVAudioFile?
+    private let sinkLock = NSLock()
+    private weak var audioSink: RecordedAudioSink?
+
+    var videoSink: RecordedAudioSink? {
+        get {
+            sinkLock.lock()
+            defer { sinkLock.unlock() }
+            return audioSink
+        }
+        set {
+            sinkLock.lock()
+            audioSink = newValue
+            sinkLock.unlock()
+        }
+    }
 
     var armed: Bool { AmpRecorderStateGet(state).armed }
     var recordBassOnly: Bool {
@@ -135,6 +180,7 @@ final class Recorder: @unchecked Sendable {
         } catch {
             NSLog("xzyqrn amp recorder write failed: \(error)")
         }
+        videoSink?.appendRecordedAudio(samples, count: count)
     }
 }
 
@@ -143,11 +189,16 @@ enum RecordingStore {
         try AmpPaths.subdirectory("Recordings")
     }
 
-    static func newURL() throws -> URL {
+    static func newURL(mode: RecordMode = .audio) throws -> URL {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd HH-mm-ss"
-        let name = "Take \(formatter.string(from: Date())).wav"
+        let name = "Take \(formatter.string(from: Date())).\(mode.fileExtension)"
         return try directory().appendingPathComponent(name)
+    }
+
+    static func temporaryAudioURL(matching takeURL: URL) -> URL {
+        let name = takeURL.deletingPathExtension().lastPathComponent + ".wav"
+        return FileManager.default.temporaryDirectory.appendingPathComponent(name)
     }
 
     static func loadAll() -> [RecordingTake] {
@@ -159,12 +210,19 @@ enum RecordingStore {
                 options: [.skipsHiddenFiles]
             )
             return files.compactMap { url -> RecordingTake? in
-                guard url.pathExtension.lowercased() == "wav" else { return nil }
+                let ext = url.pathExtension.lowercased()
+                guard ["wav", "mov", "mp4", "m4v"].contains(ext) else { return nil }
                 let values = try? url.resourceValues(forKeys: [.contentModificationDateKey])
                 let date = values?.contentModificationDate ?? Date()
-                let duration = (try? AVAudioFile(forReading: url)).map {
-                    Double($0.length) / max($0.processingFormat.sampleRate, 1)
-                } ?? 0
+                let duration: TimeInterval
+                if ext == "wav" {
+                    duration = (try? AVAudioFile(forReading: url)).map {
+                        Double($0.length) / max($0.processingFormat.sampleRate, 1)
+                    } ?? 0
+                } else {
+                    let seconds = CMTimeGetSeconds(AVURLAsset(url: url).duration)
+                    duration = seconds.isFinite ? seconds : 0
+                }
                 return RecordingTake(
                     url: url,
                     name: url.deletingPathExtension().lastPathComponent,

@@ -28,6 +28,25 @@ struct PracticeLabView: View {
         .background(AmpTheme.bg)
         .preferredColorScheme(.dark)
         .frame(minWidth: 1040, minHeight: 720)
+        .overlay(alignment: .bottomTrailing) {
+            DraggableCameraPreviewHost(placementID: "lab", bottomReserve: 16)
+        }
+        .onAppear {
+            if amp.recordMode == .video {
+                Task { await amp.prepareVideoMode(presentErrors: false) }
+            }
+        }
+        .alert(
+            "xzyqrn amp",
+            isPresented: Binding(
+                get: { amp.errorMessage != nil },
+                set: { if !$0 { amp.errorMessage = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) { amp.errorMessage = nil }
+        } message: {
+            Text(amp.errorMessage ?? "")
+        }
     }
 
     private var practiceHeader: some View {
@@ -189,13 +208,31 @@ struct PracticeLabView: View {
         StudioCard {
             VStack(alignment: .leading, spacing: 10) {
                 SectionLabel(text: "Take")
-                Button(amp.isRecording ? "Stop recording" : "Record practice") { amp.toggleRecord() }
+                RecordModePicker(
+                    selection: Binding(
+                        get: { amp.recordMode },
+                        set: { amp.setRecordMode($0) }
+                    ),
+                    enabled: !amp.isRecording && !amp.isFinishingRecording
+                )
+                if amp.recordMode == .video {
+                    Text(amp.cameraPreviewOn
+                         ? "Camera preview is floating — drag it anywhere."
+                         : "Choose Video to preview the camera. Audio still records bass only or the full mix.")
+                        .font(AmpTheme.caption(9))
+                        .foregroundStyle(AmpTheme.faint)
+                }
+                Button(amp.isFinishingRecording
+                       ? "Finishing video…"
+                       : (amp.isRecording ? "Stop recording" : (amp.recordMode == .video ? "Record video" : "Record practice"))) {
+                    amp.toggleRecord()
+                }
                     .buttonStyle(StudioButton(prominent: amp.isRecording))
-                    .disabled(!amp.isRunning && !amp.isRecording)
+                    .disabled((!amp.isRunning && !amp.isRecording) || amp.isFinishingRecording)
                 LEDToggle(isOn: $amp.recordBassOnly, title: "Bass only") {
                     amp.applyRecordSource()
                 }
-                .help("Off records everything playing to the selected output, including other apps. On records processed bass only.")
+                .help("Off records everything playing to the selected output, including other apps. On records processed bass only. Applies to both audio and video takes.")
                 Text(amp.recordBassOnly
                      ? "Records processed bass only — no click, no other apps."
                      : "Records everything playing to the selected output, including other apps.")

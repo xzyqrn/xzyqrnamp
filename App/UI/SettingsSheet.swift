@@ -99,9 +99,20 @@ struct SettingsSheet: View {
             }
 
             Section("Recordings") {
-                Text("Takes land in Application Support / xzyqrn amp / Recordings. The bundle ID stays com.herojay.Amplifier so microphone permission survives this rename.")
+                Text("Audio takes are WAV files. Video takes are MOV files with the camera plus the same bass / mix audio, including Bass only.")
                     .font(AmpTheme.caption(12))
                     .foregroundStyle(AmpTheme.muted)
+                if !session.cameras.isEmpty {
+                    Picker("Camera", selection: Binding(
+                        get: { session.selectedCameraID },
+                        set: { session.selectCamera($0) }
+                    )) {
+                        ForEach(session.cameras) { camera in
+                            Text(camera.name).tag(camera.id)
+                        }
+                    }
+                    .disabled(session.isRecording || session.isFinishingRecording)
+                }
                 Button("Open recordings folder") {
                     session.revealRecordingsFolder()
                 }
@@ -109,6 +120,9 @@ struct SettingsSheet: View {
         }
         .formStyle(.grouped)
         .preferredColorScheme(.dark)
-        .onAppear { session.refreshDevices() }
+        .onAppear {
+            session.refreshDevices()
+            session.refreshCameras()
+        }
     }
 }

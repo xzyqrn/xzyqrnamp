@@ -7,7 +7,7 @@ struct EffectsRail: View {
         VStack(alignment: .leading, spacing: 10) {
             SignalPathStrip()
 
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4), spacing: 10) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 230, maximum: 520), spacing: 10)], spacing: 10) {
                 PedalCard(title: "Comp", pedal: "comp", isOn: $session.compOn) {
                     AmpKnob(value: $session.compThresholdDb, range: -40 ... -6, label: "Thr", size: 40, format: { String(format: "%.0f dB", $0) }, onChange: session.pushAllParams)
                     AmpKnob(value: $session.compRatio, range: 1.5...12, label: "Ratio", size: 40, format: { String(format: "%.1f:1", $0) }, onChange: session.pushAllParams)
@@ -47,6 +47,7 @@ struct EffectsRail: View {
                     AmpKnob(value: $session.lowPassHz, range: 1200...16000, label: "LPF", size: 40, format: { $0 >= 1000 ? String(format: "%.1f k", $0 / 1000) : String(format: "%.0f", $0) }, onChange: session.pushAllParams)
                 }
             }
+            .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -78,40 +79,45 @@ private struct SignalPathStrip: View {
 
     var body: some View {
         StudioCard(padding: 8) {
-            HStack(spacing: 6) {
-                Text("PATH")
-                    .font(AmpTheme.label(9))
-                    .tracking(1.6)
-                    .foregroundStyle(AmpTheme.faint)
-                    .frame(width: 40, alignment: .leading)
-                ForEach(Array(stages.enumerated()), id: \.element.id) { index, stage in
-                    if index > 0 {
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 8, weight: .bold))
-                            .foregroundStyle(AmpTheme.faint)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    Text("PATH")
+                        .font(AmpTheme.label(9))
+                        .tracking(1.6)
+                        .foregroundStyle(AmpTheme.faint)
+                        .frame(width: 40, alignment: .leading)
+                    ForEach(Array(stages.enumerated()), id: \.element.id) { index, stage in
+                        if index > 0 {
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundStyle(AmpTheme.faint)
+                        }
+                        Button {
+                            guard stage.toggleable else { return }
+                            stage.toggle()
+                            session.pushAllParams()
+                        } label: {
+                            Text(stage.label)
+                                .font(AmpTheme.mono(9, weight: stage.isOn && stage.toggleable ? .bold : .medium))
+                                .foregroundStyle(chipForeground(stage))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 6)
+                                .background(chipFill(stage))
+                                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                        .strokeBorder(chipStroke(stage), lineWidth: 1)
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .fixedSize()
+                        .disabled(!stage.toggleable)
+                        .help(stage.toggleable ? "Toggle \(stage.label)" : "Always in the path")
                     }
-                    Button {
-                        guard stage.toggleable else { return }
-                        stage.toggle()
-                        session.pushAllParams()
-                    } label: {
-                        Text(stage.label)
-                            .font(AmpTheme.mono(9, weight: stage.isOn && stage.toggleable ? .bold : .medium))
-                            .foregroundStyle(chipForeground(stage))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 6)
-                            .background(chipFill(stage))
-                            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                    .strokeBorder(chipStroke(stage), lineWidth: 1)
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!stage.toggleable)
-                    .help(stage.toggleable ? "Toggle \(stage.label)" : "Always in the path")
                 }
             }
+            .scrollBounceBehavior(.basedOnSize)
+            .frame(minHeight: 34)
         }
     }
 
@@ -159,9 +165,13 @@ private struct PedalCard<Knobs: View>: View {
                         session.pushAllParams()
                     }
                 }
-                HStack(spacing: 8) {
-                    knobs()
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        knobs()
+                    }
+                    .frame(minHeight: 72)
                 }
+                .scrollBounceBehavior(.basedOnSize)
                 .frame(maxWidth: .infinity, minHeight: 72, alignment: .center)
                 Menu {
                     ForEach(PedalFactoryPreset.presets(for: pedal)) { preset in

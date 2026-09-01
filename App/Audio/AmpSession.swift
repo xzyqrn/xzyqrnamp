@@ -157,14 +157,27 @@ final class AmpSession: ObservableObject {
     var recordElapsed: TimeInterval { liveMetrics.recordElapsed }
     var recordPeak: Double { liveMetrics.recordPeak }
     @Published var recordBassOnly = false
+    @Published var recordMode: RecordMode = .audio
+    @Published var cameras: [CameraInfo] = []
+    @Published var selectedCameraID = ""
+    @Published var cameraPreviewOn = false
+    @Published var isFinishingRecording = false
     @Published var takes: [RecordingTake] = []
     @Published var playingTakeID: String?
 
     let beatPlayer = BeatPlayer()
     let recorder = Recorder()
+    let videoRecorder = VideoRecorder()
+    var cameraCaptureSession: AVCaptureSession { videoRecorder.captureSession }
     private let outputTap = SystemOutputTap()
     private var takePlayer: AVAudioPlayer?
     private var takePlaybackDelegate: TakePlaybackDelegate?
+    private let videoTakePanel = VideoTakePanelController()
+    private var pendingVideoURL: URL?
+    private var pendingAudioURL: URL?
+    private var audioIsTemporary = false
+    private var recordOp: Task<Void, Never>?
+    private var stopAfterStart = false
 
     private var engine = AVAudioEngine()
     private var sinkNode: AVAudioSinkNode?
@@ -187,6 +200,8 @@ final class AmpSession: ObservableObject {
     static let passthroughAmpName = "Passthrough"
     private static let lastNAMBookmarkKey = "xzyqrn.lastNAMBookmark"
     private static let lastIRBookmarkKey = "xzyqrn.lastIRBookmark"
+    private static let recordModeKey = "xzyqrn.recordMode"
+    private static let cameraIDKey = "xzyqrn.cameraID"
 
     var inputLabel: String {
         devices.first(where: { $0.id == inputDeviceID })?.displayName ?? "System input"
@@ -224,6 +239,10 @@ final class AmpSession: ObservableObject {
         adoptPreferredDevices()
         pushAllParams()
         takes = RecordingStore.loadAll()
+        restoreRecordPreferences()
+        videoTakePanel.onClose = { [weak self] in
+            self?.playingTakeID = nil
+        }
         hardwareListener = CoreAudioDevices.addHardwareListener { [weak self] in
             guard let self else { return }
             self.handleHardwareChange()
@@ -1276,28 +1295,55 @@ final class AmpSession: ObservableObject {
     }
 
     func toggleRecord() {
+        if isFinishingRecording { return }
         if isRecording {
-            stopRecording()
+            enqueueRecordOp { await self.stopRecordingAndFinalize() }
+            return
+        }
+        if recordOp != nil {
+            stopAfterStart = true
             return
         }
         guard isRunning else {
             errorMessage = "Power on before recording."
             return
         }
-        do {
-            let url = try RecordingStore.newURL()
-            recorder.recordBassOnly = recordBassOnly
-            try recorder.start(url: url)
-            isRecording = true
-            errorMessage = nil
-            var next = liveMetrics
-            next.recordElapsed = 0
-            next.recordPeak = 0
-            liveMetrics = next
-            beginSystemOutputCaptureIfNeeded()
-        } catch {
-            errorMessage = error.localizedDescription
+        stopAfterStart = false
+        enqueueRecordOp { await self.startRecording() }
+    }
+
+    func setRecordMode(_ mode: RecordMode) {
+        guard mode != recordMode, !isRecording, !isFinishingRecording else { return }
+        recordMode = mode
+        UserDefaults.standard.set(mode.rawValue, forKey: Self.recordModeKey)
+        if mode == .video {
+            Task { await prepareVideoMode() }
+        } else {
+            cameraPreviewOn = false
+            videoRecorder.stopSession()
         }
+    }
+
+    func selectCamera(_ id: String) {
+        selectedCameraID = id
+        UserDefaults.standard.set(id, forKey: Self.cameraIDKey)
+        guard recordMode == .video, !isRecording, !isFinishingRecording else { return }
+        Task { await prepareVideoMode() }
+    }
+
+    func refreshCameras() {
+        cameras = VideoRecorder.cameras()
+        if cameras.contains(where: { $0.id == selectedCameraID }) { return }
+        if let saved = UserDefaults.standard.string(forKey: Self.cameraIDKey),
+           cameras.contains(where: { $0.id == saved }) {
+            selectedCameraID = saved
+            return
+        }
+        selectedCameraID = cameras.first?.id ?? ""
+    }
+
+    var selectedCameraName: String {
+        cameras.first(where: { $0.id == selectedCameraID })?.name ?? "Camera"
     }
 
     func applyRecordSource() {
@@ -1310,38 +1356,13 @@ final class AmpSession: ObservableObject {
         }
     }
 
-    func stopRecording() {
-        guard isRecording else { return }
-        outputTap.stop()
-        recorder.stop()
-        isRecording = false
-        var next = liveMetrics
-        next.recordElapsed = recorder.elapsed
-        liveMetrics = next
-        takes = RecordingStore.loadAll()
-    }
-
-    private func beginSystemOutputCaptureIfNeeded() {
-        guard isRecording, !recordBassOnly else {
-            outputTap.stop()
-            return
-        }
-        if outputTap.isRunning { return }
-        do {
-            try outputTap.start(
-                outputUID: CoreAudioDevices.uid(of: outputDeviceID),
-                preferGlobalTap: analogDuplexRoute,
-                expectedSampleRate: recorder.sampleRate,
-                recorder: recorder
-            )
-        } catch {
-            NSLog("xzyqrn amp system tap failed: \(error.localizedDescription)")
-            errorMessage = "Recording this amp only. To capture other apps, allow System Audio Recording in System Settings → Privacy & Security."
-        }
-    }
-
     func playTake(_ take: RecordingTake) {
         stopTakePlayback()
+        if take.isVideo {
+            playingTakeID = take.id
+            videoTakePanel.show(take: take)
+            return
+        }
         do {
             let accessing = take.url.startAccessingSecurityScopedResource()
             defer { if accessing { take.url.stopAccessingSecurityScopedResource() } }
@@ -1370,6 +1391,7 @@ final class AmpSession: ObservableObject {
         takePlayer = nil
         takePlaybackDelegate = nil
         playingTakeID = nil
+        videoTakePanel.close()
     }
 
     func deleteTake(_ take: RecordingTake) {
@@ -1390,7 +1412,7 @@ final class AmpSession: ObservableObject {
 
     func exportTake(_ take: RecordingTake) {
         let panel = NSSavePanel()
-        panel.allowedContentTypes = [.wav]
+        panel.allowedContentTypes = take.isVideo ? [.quickTimeMovie, .mpeg4Movie] : [.wav]
         panel.nameFieldStringValue = take.url.lastPathComponent
         panel.canCreateDirectories = true
         panel.begin { [weak self] response in
@@ -1408,10 +1430,204 @@ final class AmpSession: ObservableObject {
         }
     }
 
+    private func enqueueRecordOp(_ work: @escaping () async -> Void) {
+        guard recordOp == nil else { return }
+        recordOp = Task { @MainActor in
+            await work()
+            self.recordOp = nil
+        }
+    }
+
+    private func startRecording() async {
+        do {
+            guard isRunning else {
+                stopAfterStart = false
+                return
+            }
+            if recordMode == .video {
+                await prepareVideoMode(presentErrors: true)
+                guard isRunning, cameraPreviewOn else {
+                    stopAfterStart = false
+                    return
+                }
+            }
+            let takeURL = try RecordingStore.newURL(mode: recordMode)
+            let audioURL = recordMode == .video
+                ? RecordingStore.temporaryAudioURL(matching: takeURL)
+                : takeURL
+            recorder.recordBassOnly = recordBassOnly
+            if recordMode == .video {
+                recorder.videoSink = videoRecorder
+                try videoRecorder.startWriting(to: takeURL, sampleRate: recorder.sampleRate)
+            } else {
+                recorder.videoSink = nil
+            }
+            try recorder.start(url: audioURL)
+            pendingVideoURL = recordMode == .video ? takeURL : nil
+            pendingAudioURL = audioURL
+            audioIsTemporary = recordMode == .video
+            isRecording = true
+            errorMessage = nil
+            var next = liveMetrics
+            next.recordElapsed = 0
+            next.recordPeak = 0
+            liveMetrics = next
+            beginSystemOutputCaptureIfNeeded()
+            if stopAfterStart {
+                stopAfterStart = false
+                await stopRecordingAndFinalize()
+            }
+        } catch {
+            stopAfterStart = false
+            recorder.videoSink = nil
+            videoRecorder.abortWriting()
+            pendingVideoURL = nil
+            pendingAudioURL = nil
+            audioIsTemporary = false
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func stopRecordingAndFinalize() async {
+        guard isRecording, !isFinishingRecording else { return }
+        isFinishingRecording = recordMode == .video
+        outputTap.stop()
+        recorder.stop()
+        recorder.videoSink = nil
+        isRecording = false
+        var next = liveMetrics
+        next.recordElapsed = recorder.elapsed
+        liveMetrics = next
+        await finalizeVideoTake()
+        isFinishingRecording = false
+        takes = RecordingStore.loadAll()
+    }
+
+    private func finalizeVideoTake() async {
+        guard let videoURL = pendingVideoURL else {
+            pendingAudioURL = nil
+            audioIsTemporary = false
+            return
+        }
+        let audioURL = pendingAudioURL
+        let keepAudioIfVideoFails = audioIsTemporary
+        pendingVideoURL = nil
+        pendingAudioURL = nil
+        audioIsTemporary = false
+        let restoredStatus = status
+        status = "Finishing video…"
+        let result = await videoRecorder.finishWriting()
+        switch result {
+        case .success:
+            if keepAudioIfVideoFails, let audioURL {
+                try? FileManager.default.removeItem(at: audioURL)
+            }
+        case .noVideoFrames:
+            if let audioURL {
+                await promoteAudioTake(from: audioURL, fallbackName: videoURL)
+            }
+            try? FileManager.default.removeItem(at: videoURL)
+            errorMessage = "No camera frames arrived. Saved an audio take instead."
+        case .failed(let message):
+            if let audioURL {
+                await promoteAudioTake(from: audioURL, fallbackName: videoURL)
+            }
+            try? FileManager.default.removeItem(at: videoURL)
+            errorMessage = "\(message) Saved an audio take instead."
+        }
+        status = isRunning ? restoredStatus : "Off"
+    }
+
+    private func promoteAudioTake(from tempURL: URL, fallbackName videoURL: URL) async {
+        let dest = videoURL.deletingPathExtension().appendingPathExtension("wav")
+        do {
+            if FileManager.default.fileExists(atPath: dest.path) {
+                try FileManager.default.removeItem(at: dest)
+            }
+            if FileManager.default.fileExists(atPath: tempURL.path) {
+                try FileManager.default.moveItem(at: tempURL, to: dest)
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func prepareVideoMode(presentErrors: Bool = true) async {
+        refreshCameras()
+        guard await requestCameraAccess() else {
+            cameraPreviewOn = false
+            if presentErrors {
+                errorMessage = "Camera access is off. Enable it in System Settings → Privacy & Security → Camera, or switch REC to Audio."
+            }
+            return
+        }
+        do {
+            try await videoRecorder.ensureRunning(deviceID: selectedCameraID.isEmpty ? nil : selectedCameraID)
+            cameraPreviewOn = true
+        } catch {
+            cameraPreviewOn = false
+            if presentErrors {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func requestCameraAccess() async -> Bool {
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            return true
+        case .notDetermined:
+            return await withCheckedContinuation { cont in
+                AVCaptureDevice.requestAccess(for: .video) { granted in
+                    cont.resume(returning: granted)
+                }
+            }
+        case .denied, .restricted:
+            return false
+        @unknown default:
+            return false
+        }
+    }
+
+    private func restoreRecordPreferences() {
+        if let raw = UserDefaults.standard.string(forKey: Self.recordModeKey),
+           let mode = RecordMode(rawValue: raw) {
+            recordMode = mode
+        }
+        refreshCameras()
+    }
+
+    private func beginSystemOutputCaptureIfNeeded() {
+        guard isRecording, !recordBassOnly else {
+            outputTap.stop()
+            return
+        }
+        if outputTap.isRunning { return }
+        do {
+            try outputTap.start(
+                outputUID: CoreAudioDevices.uid(of: outputDeviceID),
+                preferGlobalTap: analogDuplexRoute,
+                expectedSampleRate: recorder.sampleRate,
+                recorder: recorder
+            )
+        } catch {
+            NSLog("xzyqrn amp system tap failed: \(error.localizedDescription)")
+            errorMessage = "Recording this amp only. To capture other apps, allow System Audio Recording in System Settings → Privacy & Security."
+        }
+    }
+
     private func stopEngineOnly() {
         outputTap.stop()
         if isRecording {
-            stopRecording()
+            isFinishingRecording = pendingVideoURL != nil
+            recorder.stop()
+            recorder.videoSink = nil
+            isRecording = false
+            Task { @MainActor in
+                await self.finalizeVideoTake()
+                self.isFinishingRecording = false
+                self.takes = RecordingStore.loadAll()
+            }
         }
         stopTakePlayback()
         meterTimer?.invalidate()

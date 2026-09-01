@@ -14,7 +14,7 @@ struct XzyqrnAmpApp: App {
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentMinSize)
-        .defaultSize(width: 1200, height: 800)
+        .defaultSize(width: 1280, height: 900)
 
         Window("Bass Method", id: "bass-method") {
             BassMethodLessonView()
@@ -40,7 +40,7 @@ struct XzyqrnAmpApp: App {
         Settings {
             SettingsSheet()
                 .environmentObject(session)
-                .frame(width: 460, height: 580)
+                .frame(width: 460, height: 640)
         }
     }
 }

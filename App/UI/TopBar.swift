@@ -5,41 +5,79 @@ struct TopBar: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        HStack(spacing: 14) {
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text("xzyqrn")
-                        .font(AmpTheme.display(22, weight: .bold))
-                        .tracking(1.2)
-                        .foregroundStyle(AmpTheme.text)
-                    Text("AMP")
-                        .font(AmpTheme.display(22, weight: .bold))
-                        .tracking(3)
-                        .foregroundStyle(AmpTheme.accent)
-                }
-                Text(session.status)
-                    .font(AmpTheme.mono(11))
-                    .foregroundStyle(AmpTheme.muted)
-                    .lineLimit(1)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 14) {
+                brand
+                Spacer(minLength: 12)
+                ioChips.fixedSize(horizontal: true, vertical: false)
+                latencyBlock
+                actionCluster
             }
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 12) {
+                    brand
+                    Spacer(minLength: 8)
+                    actionCluster
+                }
+                HStack(spacing: 12) {
+                    ioChips
+                    Spacer(minLength: 8)
+                    latencyBlock
+                }
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 10)
+        .background(AmpTheme.bg.opacity(0.94))
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(AmpTheme.line).frame(height: 1)
+        }
+    }
 
-            Spacer(minLength: 12)
+    private var brand: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("xzyqrn")
+                    .font(AmpTheme.display(22, weight: .bold))
+                    .tracking(1.2)
+                    .foregroundStyle(AmpTheme.text)
+                Text("AMP")
+                    .font(AmpTheme.display(22, weight: .bold))
+                    .tracking(3)
+                    .foregroundStyle(AmpTheme.accent)
+            }
+            Text(session.status)
+                .font(AmpTheme.mono(11))
+                .foregroundStyle(AmpTheme.muted)
+                .lineLimit(1)
+        }
+        .fixedSize(horizontal: true, vertical: false)
+    }
 
+    private var ioChips: some View {
+        HStack(spacing: 10) {
             DeviceChip(title: "In", value: session.inputLabel)
                 .frame(maxWidth: 180, alignment: .leading)
             DeviceChip(title: "Out", value: session.outputLabel)
                 .frame(maxWidth: 180, alignment: .leading)
+        }
+    }
 
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(String(format: "est. %.1f ms", session.latencyMs))
-                    .font(AmpTheme.mono(12, weight: .semibold))
-                    .foregroundStyle(AmpTheme.text)
-                Text(String(format: "%.0f Hz · %d", session.hardwareSampleRate, session.hardwareBuffer))
-                    .font(AmpTheme.mono(10))
-                    .foregroundStyle(AmpTheme.faint)
-            }
-            .frame(minWidth: 92, alignment: .trailing)
+    private var latencyBlock: some View {
+        VStack(alignment: .trailing, spacing: 2) {
+            Text(String(format: "est. %.1f ms", session.latencyMs))
+                .font(AmpTheme.mono(12, weight: .semibold))
+                .foregroundStyle(AmpTheme.text)
+            Text(String(format: "%.0f Hz · %d", session.hardwareSampleRate, session.hardwareBuffer))
+                .font(AmpTheme.mono(10))
+                .foregroundStyle(AmpTheme.faint)
+        }
+        .frame(minWidth: 92, alignment: .trailing)
+        .fixedSize(horizontal: true, vertical: false)
+    }
 
+    private var actionCluster: some View {
+        HStack(spacing: 10) {
             PowerButton(isOn: session.isRunning, action: session.togglePower)
 
             LEDToggle(isOn: $session.bypass, title: session.bypass ? "Bypass" : "Live") {
@@ -90,12 +128,7 @@ struct TopBar: View {
             .buttonStyle(.plain)
             .help("Input, output, buffer size")
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 10)
-        .background(AmpTheme.bg.opacity(0.94))
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(AmpTheme.line).frame(height: 1)
-        }
+        .fixedSize(horizontal: true, vertical: false)
     }
 }
 

@@ -13,37 +13,50 @@ struct AmpView: View {
     var body: some View {
         VStack(spacing: 0) {
             TopBar()
-            VStack(spacing: 14) {
-                AmpPanel(
-                    onLoadNAM: {
-                        importerKind = .nam
-                        showImporter = true
-                    },
-                    onLoadIR: {
-                        importerKind = .ir
-                        showImporter = true
-                    },
-                    onSavePreset: { showSave = true }
-                )
-                EffectsRail()
+            ScrollView(.vertical, showsIndicators: true) {
+                VStack(spacing: 14) {
+                    AmpPanel(
+                        onLoadNAM: {
+                            importerKind = .nam
+                            showImporter = true
+                        },
+                        onLoadIR: {
+                            importerKind = .ir
+                            showImporter = true
+                        },
+                        onSavePreset: { showSave = true }
+                    )
+                    EffectsRail()
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 14)
+                .padding(.bottom, 24)
+                .frame(maxWidth: .infinity, alignment: .top)
+                .fixedSize(horizontal: false, vertical: true)
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 14)
-            .padding(.bottom, 8)
-            Spacer(minLength: 0)
+            .scrollBounceBehavior(.basedOnSize)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             TransportBar()
         }
         .background(AmpTheme.bg)
         .preferredColorScheme(.dark)
         .padding(.top, 22)
-        .frame(minWidth: 1080, minHeight: 720)
+        .frame(minWidth: 960, minHeight: 640)
+        .overlay(alignment: .bottomTrailing) {
+            DraggableCameraPreviewHost(placementID: "amp", bottomReserve: 120)
+        }
         .modifier(AmpDialogs(
             showImporter: $showImporter,
             importerKind: importerKind,
             showSave: $showSave,
             newPresetName: $newPresetName
         ))
-        .onAppear { session.refreshDevices() }
+        .onAppear {
+            session.refreshDevices()
+            if session.recordMode == .video {
+                Task { await session.prepareVideoMode(presentErrors: false) }
+            }
+        }
     }
 }
 
@@ -77,7 +90,7 @@ private struct AmpDialogs: ViewModifier {
                 Button("Cancel", role: .cancel) {}
             }
             .alert(
-                "Audio",
+                "xzyqrn amp",
                 isPresented: Binding(
                     get: { session.errorMessage != nil },
                     set: { if !$0 { session.errorMessage = nil } }

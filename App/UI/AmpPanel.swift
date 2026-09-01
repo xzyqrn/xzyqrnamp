@@ -51,61 +51,71 @@ struct AmpPanel: View {
                 HStack(alignment: .center, spacing: 8) {
                     SectionLabel(text: "Amp")
                     Spacer(minLength: 8)
-                    HStack(spacing: 6) {
-                        LEDToggle(isOn: $session.nrOn, title: "NR", onChange: session.pushAllParams)
-                        LEDToggle(isOn: $session.gateOn, title: "Gate", onChange: session.pushAllParams)
-                        LEDToggle(isOn: $session.eqOn, title: "EQ", onChange: session.pushAllParams)
-                        LEDToggle(isOn: $session.namOn, title: "Amp", onChange: session.pushAllParams)
-                        LEDToggle(isOn: $session.irOn, title: "IR", onChange: session.pushAllParams)
-                    }
-                }
-
-                HStack(spacing: 6) {
-                    AmpKnob(value: $session.inputGainDb, range: -12...24, label: "Gain", size: 46, format: dbFormat, onChange: session.pushAllParams)
-                    AmpKnob(value: $session.bassDb, range: -12...12, label: "Bass", size: 46, format: dbFormat, onChange: session.pushAllParams)
-                    AmpKnob(value: $session.midDb, range: -12...12, label: "Mid", size: 46, format: dbFormat, onChange: session.pushAllParams)
-                    AmpKnob(value: $session.trebleDb, range: -12...12, label: "Treble", size: 46, format: dbFormat, onChange: session.pushAllParams)
-                    AmpKnob(value: $session.outputGainDb, range: -24...18, label: "Master", size: 46, format: dbFormat, onChange: session.pushAllParams)
-                    AmpKnob(value: $session.gateThresholdDb, range: -80 ... -20, label: "Gate", size: 46, format: dbFormat, onChange: session.pushAllParams)
-                }
-                .frame(maxWidth: .infinity)
-
-                HStack(spacing: 8) {
-                    LEDToggle(isOn: $session.ultraLoOn, title: "Lo") { session.pushAllParams() }
-                        .help("Ultra Lo")
-                    LEDToggle(isOn: $session.ultraHiOn, title: "Hi") { session.pushAllParams() }
-                        .help("Ultra Hi")
-                    Rectangle()
-                        .fill(AmpTheme.line)
-                        .frame(width: 1, height: 16)
-                    Text("MID")
-                        .font(AmpTheme.label(9))
-                        .tracking(1.4)
-                        .foregroundStyle(AmpTheme.faint)
-                    ForEach(Array(midOptions.enumerated()), id: \.offset) { idx, title in
-                        let isSel = session.midFreqIndex == idx
-                        Button {
-                            session.midFreqIndex = idx
-                            session.pushAllParams()
-                        } label: {
-                            Text(title)
-                                .font(AmpTheme.mono(10, weight: isSel ? .bold : .medium))
-                                .foregroundStyle(isSel ? AmpTheme.accent : AmpTheme.muted)
-                                .padding(.horizontal, 7)
-                                .padding(.vertical, 4)
-                                .background(isSel ? AmpTheme.accent.opacity(0.15) : AmpTheme.surfaceRaised)
-                                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                        .strokeBorder(isSel ? AmpTheme.accent.opacity(0.5) : AmpTheme.line, lineWidth: 1)
-                                )
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            LEDToggle(isOn: $session.nrOn, title: "NR", onChange: session.pushAllParams)
+                            LEDToggle(isOn: $session.gateOn, title: "Gate", onChange: session.pushAllParams)
+                            LEDToggle(isOn: $session.eqOn, title: "EQ", onChange: session.pushAllParams)
+                            LEDToggle(isOn: $session.namOn, title: "Amp", onChange: session.pushAllParams)
+                            LEDToggle(isOn: $session.irOn, title: "IR", onChange: session.pushAllParams)
                         }
-                        .buttonStyle(.plain)
                     }
-                    Spacer(minLength: 0)
+                    .scrollBounceBehavior(.basedOnSize)
+                    .frame(minHeight: 28)
                 }
 
-                Spacer(minLength: 0)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 10) {
+                        AmpKnob(value: $session.inputGainDb, range: -12...24, label: "Gain", size: 46, format: dbFormat, onChange: session.pushAllParams)
+                        AmpKnob(value: $session.bassDb, range: -12...12, label: "Bass", size: 46, format: dbFormat, onChange: session.pushAllParams)
+                        AmpKnob(value: $session.midDb, range: -12...12, label: "Mid", size: 46, format: dbFormat, onChange: session.pushAllParams)
+                        AmpKnob(value: $session.trebleDb, range: -12...12, label: "Treble", size: 46, format: dbFormat, onChange: session.pushAllParams)
+                        AmpKnob(value: $session.outputGainDb, range: -24...18, label: "Master", size: 46, format: dbFormat, onChange: session.pushAllParams)
+                        AmpKnob(value: $session.gateThresholdDb, range: -80 ... -20, label: "Gate", size: 46, format: dbFormat, onChange: session.pushAllParams)
+                    }
+                    .padding(.vertical, 2)
+                }
+                .scrollBounceBehavior(.basedOnSize)
+                .frame(maxWidth: .infinity, minHeight: 78, alignment: .leading)
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        LEDToggle(isOn: $session.ultraLoOn, title: "Lo") { session.pushAllParams() }
+                            .help("Ultra Lo")
+                        LEDToggle(isOn: $session.ultraHiOn, title: "Hi") { session.pushAllParams() }
+                            .help("Ultra Hi")
+                        Rectangle()
+                            .fill(AmpTheme.line)
+                            .frame(width: 1, height: 16)
+                        Text("MID")
+                            .font(AmpTheme.label(9))
+                            .tracking(1.4)
+                            .foregroundStyle(AmpTheme.faint)
+                        ForEach(Array(midOptions.enumerated()), id: \.offset) { idx, title in
+                            let isSel = session.midFreqIndex == idx
+                            Button {
+                                session.midFreqIndex = idx
+                                session.pushAllParams()
+                            } label: {
+                                Text(title)
+                                    .font(AmpTheme.mono(10, weight: isSel ? .bold : .medium))
+                                    .foregroundStyle(isSel ? AmpTheme.accent : AmpTheme.muted)
+                                    .padding(.horizontal, 7)
+                                    .padding(.vertical, 4)
+                                    .background(isSel ? AmpTheme.accent.opacity(0.15) : AmpTheme.surfaceRaised)
+                                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                            .strokeBorder(isSel ? AmpTheme.accent.opacity(0.5) : AmpTheme.line, lineWidth: 1)
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                            .fixedSize()
+                        }
+                    }
+                }
+                .scrollBounceBehavior(.basedOnSize)
+                .frame(minHeight: 28)
             }
         }
     }
